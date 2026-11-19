@@ -12,13 +12,13 @@ Installation IDs are **self-declared and forgeable**. Clearing the app or rotati
 
 ## Run unit tests
 
-\`\`\`bash
+```bash
 python -m unittest discover -s tests -v
-\`\`\`
+```
 
 ## Local demonstration only
 
-\`\`\`python
+```python
 from project_x import LicenseStore
 
 store = LicenseStore("local-demo.db")
@@ -28,6 +28,6 @@ code = store.issue_code("demo.featurepack", "monthly")
 sub_end = store.redeem(code, "test-install-001")
 print(trial_end, sub_end)
 print(store.entitlement("demo.featurepack", "test-install-001"))
-\`\`\`
+```
 
 A launch service must bind entitlements to authenticated customer accounts and an abuse-resistant, privacy-reviewed device association design, and keep feature subscriptions separate from iOS signing/installation rights.

@@ -12,9 +12,9 @@ Independent technology project for **authorized** iOS app enhancements, feature 
 
 Run locally with Python 3.12+:
 
-\`\`\`bash
+```bash
 python -m unittest discover -s tests -v
-\`\`\`
+```
 
 **Not production-ready**: no public API, payments, app binaries, device-validated trials or live distribution. Product entries marked approved require verified legal rights before real use. No third-party IPA, decrypted binary, tweak source, Apple certificate or signing secret is stored here. The public repository should not receive credentials or customer data.
 
