@@ -76,7 +76,7 @@ def create_app(settings: Settings | None = None, *, clock: Callable[[], datetime
             INSERT INTO rate_buckets (token_id, action, window_start, hits)
             VALUES (:token, :action, :window, 1)
             ON CONFLICT (token_id, action, window_start)
-            DO UPDATE SET hits = hits + 1 WHERE hits < :max_hits
+            DO UPDATE SET hits = rate_buckets.hits + 1 WHERE rate_buckets.hits < :max_hits
             RETURNING hits
         """), {"token": principal.id, "action": action,
                "window": window, "max_hits": limit}).scalar_one_or_none()
