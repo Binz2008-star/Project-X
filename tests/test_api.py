@@ -36,7 +36,7 @@ def ctx(tmp_path, monkeypatch, request):
         with admin_engine.begin() as conn:
             conn.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
         admin_engine.dispose()
-        url = str(make_url(pg_base).update_query_dict({"options": f"-csearch_path={schema}"}))
+        url = make_url(pg_base).update_query_dict({"options": f"-csearch_path={schema}"}).render_as_string(hide_password=False)
     else:
         url = f"sqlite:///{tmp_path / 'api.db'}"
     settings = Settings(database_url=url, code_pepper="A" * 40, token_pepper="B" * 40)
