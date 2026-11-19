@@ -1,13 +1,21 @@
 # Project X — iOS Plus Product Lab
 
-Project X is an independently developed platform for evaluating, building, licensing, and maintaining **authorized** iOS app enhancements.
+Independent technology project for **authorized** iOS app enhancements, feature licensing, build infrastructure, and eventual distribution. The first goal is one legally viable, supportable product, not a consumer storefront.
 
-## Current state
+## Current implementation (phase 1)
 
-Bootstrap only. Active work is prepared on a separate feature branch for review before merging.
+- [Original local licensing prototype](project_x/licensing.py): one-use activation codes, 7-day trials, monthly/quarterly entitlements independent of app-signing validity.
+- [Unit tests](tests/test_licensing.py) and GitHub Actions CI.
+- [Engineering plan and upstream Swing assessment](docs/PHASE_1.md).
+- [Rights and supplier register](docs/RIGHTS_REGISTER.md).
+- [Prototype boundaries](docs/LICENSING.md).
 
-**No third-party IPA, decrypted binary, tweak source, Apple signing certificate, or third-party trademark asset is included.**
+Run locally with Python 3.12+:
 
-Commercial distribution is blocked until rights to the original application, each enhancement, and the distribution method are verified. Project X does not represent affiliation with Instagram, Snapchat, YouTube, or TikTok.
+\`\`\`bash
+python -m unittest discover -s tests -v
+\`\`\`
 
-See the upcoming development PR for the prototype license engine, product rights gates, and Swing feasibility notes.
+**Not production-ready**: no public API, payments, app binaries, device-validated trials or live distribution. Product entries marked approved require verified legal rights before real use. No third-party IPA, decrypted binary, tweak source, Apple certificate or signing secret is stored here. The public repository should not receive credentials or customer data.
+
+Swing reference: <https://github.com/theoccurrence/Swing>. We have deliberately **not** copied Swing into this repo: its top-level commercial reuse rights have not been established, and its dependencies and the source iOS applications must each be cleared separately. No relationship with Instagram, YouTube, Snapchat or TikTok is claimed.
