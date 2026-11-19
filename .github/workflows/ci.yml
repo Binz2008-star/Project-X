@@ -1,17 +1,48 @@
-name: License prototype tests
+name: Project X licensing API tests
 on:
   push:
     branches: [main, 'feature/**']
   pull_request:
-    branches: [main]
+    branches: [main, 'feature/**']
 permissions:
   contents: read
 jobs:
-  unit-tests:
+  api-tests:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: projectx_test
+          POSTGRES_USER: projectx_test
+          POSTGRES_PASSWORD: integration-test-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd 'pg_isready -U projectx_test -d projectx_test'
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PROJECT_X_TEST_POSTGRESQL_URL: postgresql+psycopg://projectx_test:integration-test-only@localhost:5432/projectx_test
+      DATABASE_URL: sqlite:///./migration-check.db
+      CODE_PEPPER: ci_only_code_pepper_00000000000000000000000
+      TOKEN_PEPPER: ci_only_token_pepper_1111111111111111111111
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m unittest discover -s tests -v
+          cache: pip
+      - name: Install backend and test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: API integration tests on SQLite and PostgreSQL
+        run: python -m pytest -q tests/test_api.py
+      - name: Original local licensing regression tests
+        run: python -m unittest discover -s tests -p 'test_licensing.py' -v
+      - name: Schema migration applies and matches ORM
+        run: |
+          alembic upgrade head
+          alembic check
+      - name: Generated OpenAPI matches checked-in spec
+        run: python -m scripts.export_openapi --check
