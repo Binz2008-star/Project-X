@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.db
+*.db-*
+.env
+.venv/
+*.ipa
+*.deb
+*.dylib
+*.p12
+*.mobileprovision
+.DS_Store
