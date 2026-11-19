@@ -84,9 +84,11 @@ def create_app(settings: Settings | None = None, *, clock: Callable[[], datetime
         if used is None:
             raise HTTPException(status_code=429, detail="Rate limit exceeded", headers={"Retry-After": "60"})
 
-    def mutate(db: Session, operation):
+    def mutate(db: Session, operation, *, sqlite_immediate: bool = False):
         try:
             with db.begin():
+                if sqlite_immediate and db.bind.dialect.name == "sqlite":
+                    db.execute(text("BEGIN IMMEDIATE"))
                 result = operation()
                 db.flush()
                 # Materialize ORM attributes while transaction is active.
@@ -118,12 +120,14 @@ def create_app(settings: Settings | None = None, *, clock: Callable[[], datetime
     @app.post("/api/v1/licenses/activate", tags=["Licenses"])
     def activate(body: Activate, db: Session = Depends(get_db), p: ApiToken = Depends(customer)):
         rate_limit(db, p, "activation", cfg.activation_limit_per_minute)
-        return mutate(db, lambda: license_read(svc(db).activate(p.user_id, body.product_id, body.activation_code)))
+        return mutate(db, lambda: license_read(svc(db).activate(p.user_id, body.product_id, body.activation_code)),
+                      sqlite_immediate=True)
 
     @app.post("/api/v1/licenses/renew", tags=["Licenses"])
     def renew(body: Renew, db: Session = Depends(get_db), p: ApiToken = Depends(customer)):
         rate_limit(db, p, "activation", cfg.activation_limit_per_minute)
-        return mutate(db, lambda: license_read(svc(db).renew(p.user_id, body.license_id, body.activation_code)))
+        return mutate(db, lambda: license_read(svc(db).renew(p.user_id, body.license_id, body.activation_code)),
+                      sqlite_immediate=True)
 
     @app.post("/api/v1/licenses/validate", response_model=ValidationResult, tags=["Licenses"])
     def validate(body: Validate, db: Session = Depends(get_db), p: ApiToken = Depends(customer)):
@@ -137,12 +141,13 @@ def create_app(settings: Settings | None = None, *, clock: Callable[[], datetime
             service = svc(db)
             obj = service._license(body.license_id, p.user_id)
             return license_read(service.revoke(obj, "customer", p.user_id))
-        return mutate(db, operation)
+        return mutate(db, operation, sqlite_immediate=True)
 
     @app.post("/api/v1/trials/start", tags=["Trials"])
     def start_trial(body: TrialStart, db: Session = Depends(get_db), p: ApiToken = Depends(customer)):
         rate_limit(db, p, "activation", cfg.activation_limit_per_minute)
-        return mutate(db, lambda: license_read(svc(db).start_trial(p.user_id, body.product_id)))
+        return mutate(db, lambda: license_read(svc(db).start_trial(p.user_id, body.product_id)),
+                      sqlite_immediate=True)
 
     @app.get("/api/v1/licenses/{license_id}", tags=["Licenses"])
     def get_license(license_id: str, db: Session = Depends(get_db), p: ApiToken = Depends(customer)):
@@ -167,7 +172,7 @@ def create_app(settings: Settings | None = None, *, clock: Callable[[], datetime
             x = svc(db).register_device(p.user_id, body.product_id)
             return {"device_id": x.id, "status": x.status,
                     "registered_at": aware(x.registered_at)}
-        return mutate(db, operation)
+        return mutate(db, operation, sqlite_immediate=True)
 
     # All administrative writes below require an administrator bearer token.
     @app.post("/api/v1/admin/products", tags=["Administration"], status_code=201)
@@ -270,7 +275,7 @@ def create_app(settings: Settings | None = None, *, clock: Callable[[], datetime
             if obj is None:
                 raise DomainError("License not found", 404)
             return license_read(svc(db).revoke(obj, "admin", p.id))
-        return mutate(db, operation)
+        return mutate(db, operation, sqlite_immediate=True)
 
     @app.post("/api/v1/admin/licenses/{license_id}/extend", tags=["Administration"])
     def admin_extend(license_id: str, body: AdminExtend,
@@ -282,7 +287,7 @@ def create_app(settings: Settings | None = None, *, clock: Callable[[], datetime
             if obj is None:
                 raise DomainError("License not found", 404)
             return license_read(svc(db).admin_extend(obj, body.days, p.id))
-        return mutate(db, operation)
+        return mutate(db, operation, sqlite_immediate=True)
 
     @app.post("/api/v1/admin/tokens/{token_id}/revoke", tags=["Administration"])
     def admin_revoke_token(token_id: str, db: Session = Depends(get_db), p: ApiToken = Depends(admin)):

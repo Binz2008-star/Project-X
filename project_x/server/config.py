@@ -12,6 +12,7 @@ class Settings:
     trial_days: int = 7
     activation_limit_per_minute: int = 10
     validation_limit_per_minute: int = 60
+    max_devices_per_product: int = 5
 
     def __post_init__(self):
         if not self.database_url.startswith(("sqlite://", "postgresql+psycopg://")):
@@ -26,6 +27,8 @@ class Settings:
             raise ValueError("Duplicate subscription duration")
         if not (1 <= self.trial_days <= 30):
             raise ValueError("TRIAL_DAYS must be between 1 and 30")
+        if not (1 <= self.max_devices_per_product <= 100):
+            raise ValueError("MAX_DEVICES_PER_PRODUCT must be 1..100")
         if self.activation_limit_per_minute < 1 or self.validation_limit_per_minute < 1:
             raise ValueError("Rate limits must be positive")
 
@@ -45,4 +48,5 @@ class Settings:
             trial_days=int(os.getenv("TRIAL_DAYS", "7")),
             activation_limit_per_minute=int(os.getenv("ACTIVATION_LIMIT_PER_MINUTE", "10")),
             validation_limit_per_minute=int(os.getenv("VALIDATION_LIMIT_PER_MINUTE", "60")),
+            max_devices_per_product=int(os.getenv("MAX_DEVICES_PER_PRODUCT", "5")),
         )

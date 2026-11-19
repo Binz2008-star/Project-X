@@ -9,6 +9,7 @@ Independent technology project for **authorized** iOS app enhancements, feature 
 - [Engineering plan and upstream Swing assessment](docs/PHASE_1.md).
 - [Rights and supplier register](docs/RIGHTS_REGISTER.md).
 - [Prototype boundaries](docs/LICENSING.md).
+- [API setup and local development](docs/API_SETUP.md), [implementation and security status](docs/API_STATUS.md), and [versioned OpenAPI spec](docs/openapi.json).
 
 Run locally with Python 3.12+:
 
@@ -16,7 +17,7 @@ Run locally with Python 3.12+:
 python -m unittest discover -s tests -v
 ```
 
-**Not production-ready**: no public API, payments, app binaries, device-validated trials or live distribution. `approved` product entries require verified legal rights before real use. No third-party IPA, decrypted binary, tweak source, Apple certificate or signing secret is stored here. The public repository should not receive credentials or customer data.
+**Not production-ready**: the API service is implemented in feature branches, but no verified customer authentication, device attestation, payments, app binaries, or live distribution exists. `approved` product entries require verified legal rights before real use. No third-party IPA, decrypted binary, tweak source, Apple certificate or signing secret is stored here. The public repository should not receive credentials or customer data.
 
 Swing reference: <https://github.com/theoccurrence/Swing>. We have deliberately **not** copied Swing into this repo: its top-level commercial reuse rights have not been established, and its dependencies and the source iOS applications must each be cleared separately. No relationship with Instagram, YouTube, Snapchat or TikTok is claimed.
 
