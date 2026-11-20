@@ -43,10 +43,34 @@ jobs:
           set -euo pipefail
           cd ios/XinstaCore
           xcodebuild -list
+
+          SIM_NAME="XinstaUIKitTestsSimulator"
+          if xcrun simctl list devices | grep -q "$SIM_NAME"; then
+            xcrun simctl delete "$SIM_NAME"
+          fi
+
+          RUNTIME_ID="$(xcrun simctl list runtimes available \
+            | sed -n 's/.*\(com.apple.CoreSimulator.SimRuntime.iOS-[^)]*\).*/\1/p' \
+            | tail -n 1)"
+          DEVICE_TYPE_ID="$(xcrun simctl list devicetypes \
+            | sed -n 's/.*\(com.apple.CoreSimulator.SimDeviceType.iPhone-16\).*/\1/p' \
+            | head -n 1)"
+          if [[ -z "$DEVICE_TYPE_ID" ]]; then
+            DEVICE_TYPE_ID="$(xcrun simctl list devicetypes \
+              | sed -n 's/.*\(com.apple.CoreSimulator.SimDeviceType.iPhone-[^)]*\).*/\1/p' \
+              | tail -n 1)"
+          fi
+
+          echo "Simulator runtime: $RUNTIME_ID"
+          echo "Simulator device type: $DEVICE_TYPE_ID"
+          xcrun simctl create "$SIM_NAME" "$DEVICE_TYPE_ID" "$RUNTIME_ID"
+          xcrun simctl boot "$SIM_NAME"
+          xcrun simctl bootstatus "$SIM_NAME" -b
+
           xcodebuild test \
             -scheme XinstaCore \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -destination "platform=iOS Simulator,name=$SIM_NAME" \
             -derivedDataPath "$RUNNER_TEMP/XinstaCoreDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
