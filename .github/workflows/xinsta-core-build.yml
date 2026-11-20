@@ -40,7 +40,7 @@ jobs:
 
       - name: Verify artifact is an arm64 Mach-O dylib
         run: |
-          file build/libXinstaCore.dylib
-          test -s build/libXinstaCore.dylib
-          otool -hv build/libXinstaCore.dylib | grep -E 'MH_DYLIB|ARM64'
+          file ios/XinstaCore/build/libXinstaCore.dylib
+          test -s ios/XinstaCore/build/libXinstaCore.dylib
+          otool -hv ios/XinstaCore/build/libXinstaCore.dylib | grep -E 'MH_DYLIB|ARM64'
           echo "Xinsta Core artifact verified"
