@@ -34,7 +34,58 @@ SOURCES=(
   "${SOURCES[@]}" \
   -framework Foundation -framework UIKit
 
-# Verify the artifact is an arm64 iOS Mach-O dylib before reporting success.
-file "$OUT/libXinstaCore.dylib"
-xcrun --sdk iphoneos llvm-objdump --macho --private-headers "$OUT/libXinstaCore.dylib" \
-  | grep -E 'MH_DYLIB|CPU_TYPE_ARM64|LC_BUILD_VERSION|IPHONEOS' || true
+# Verify the artifact is an arm64 iOS Mach-O dylib. Every check below fails
+# the build explicitly; no validation result is suppressed.
+ARTIFACT="$OUT/libXinstaCore.dylib"
+
+if [[ ! -f "$ARTIFACT" ]]; then
+  echo "ERROR: expected artifact not found: $ARTIFACT" >&2
+  exit 1
+fi
+if [[ ! -s "$ARTIFACT" ]]; then
+  echo "ERROR: artifact is empty: $ARTIFACT" >&2
+  exit 1
+fi
+
+FILE_DESCRIPTION="$(file -b "$ARTIFACT")"
+echo "file: $FILE_DESCRIPTION"
+if ! grep -q 'Mach-O 64-bit' <<<"$FILE_DESCRIPTION"; then
+  echo "ERROR: artifact is not a 64-bit Mach-O file" >&2
+  exit 1
+fi
+if ! grep -q 'arm64' <<<"$FILE_DESCRIPTION"; then
+  echo "ERROR: artifact is not arm64" >&2
+  exit 1
+fi
+if ! grep -qi 'dynamically linked shared library' <<<"$FILE_DESCRIPTION"; then
+  echo "ERROR: artifact is not a dynamic library (dylib)" >&2
+  exit 1
+fi
+
+MACHO_HEADER="$(otool -hv "$ARTIFACT")"
+echo "$MACHO_HEADER"
+if ! grep -q 'MH_MAGIC_64' <<<"$MACHO_HEADER"; then
+  echo "ERROR: artifact lacks a 64-bit Mach-O header" >&2
+  exit 1
+fi
+if ! grep -q 'ARM64' <<<"$MACHO_HEADER"; then
+  echo "ERROR: Mach-O header does not declare ARM64" >&2
+  exit 1
+fi
+if ! grep -q 'DYLIB' <<<"$MACHO_HEADER"; then
+  echo "ERROR: Mach-O filetype is not MH_DYLIB" >&2
+  exit 1
+fi
+
+LOAD_COMMANDS="$(otool -l "$ARTIFACT")"
+if grep -q 'LC_BUILD_VERSION' <<<"$LOAD_COMMANDS"; then
+  if ! grep -q 'platform IPHONEOS' <<<"$LOAD_COMMANDS"; then
+    echo "ERROR: LC_BUILD_VERSION platform is not IPHONEOS" >&2
+    exit 1
+  fi
+elif ! grep -q 'LC_VERSION_MIN_IPHONEOS' <<<"$LOAD_COMMANDS"; then
+  echo "ERROR: artifact does not target iOS" >&2
+  exit 1
+fi
+
+echo "Xinsta Core artifact validation passed"

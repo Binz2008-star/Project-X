@@ -38,9 +38,22 @@ jobs:
       - name: Run Foundation-only Core tests
         run: bash ios/XinstaCore/Scripts/run-tests.sh
 
-      - name: Verify artifact is an arm64 Mach-O dylib
+      - name: Verify artifact is an arm64 iOS Mach-O dylib
         run: |
-          file ios/XinstaCore/build/libXinstaCore.dylib
-          test -s ios/XinstaCore/build/libXinstaCore.dylib
-          otool -hv ios/XinstaCore/build/libXinstaCore.dylib | grep -E 'MH_DYLIB|ARM64'
-          echo "Xinsta Core artifact verified"
+          set -euo pipefail
+          ARTIFACT="ios/XinstaCore/build/libXinstaCore.dylib"
+          test -f "$ARTIFACT"
+          test -s "$ARTIFACT"
+          file "$ARTIFACT"
+          MACHO_HEADER="$(otool -hv "$ARTIFACT")"
+          echo "$MACHO_HEADER"
+          grep -q 'MH_MAGIC_64' <<<"$MACHO_HEADER"
+          grep -q 'ARM64' <<<"$MACHO_HEADER"
+          grep -q 'DYLIB' <<<"$MACHO_HEADER"
+          LOAD_COMMANDS="$(otool -l "$ARTIFACT")"
+          if grep -q 'LC_BUILD_VERSION' <<<"$LOAD_COMMANDS"; then
+            grep -q 'platform IPHONEOS' <<<"$LOAD_COMMANDS"
+          else
+            grep -q 'LC_VERSION_MIN_IPHONEOS' <<<"$LOAD_COMMANDS"
+          fi
+          echo "Xinsta Core artifact verified: arm64 iOS Mach-O dylib"
