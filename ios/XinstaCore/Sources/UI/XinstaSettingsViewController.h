@@ -9,10 +9,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// no assumptions about how it is shown and touches no Instagram object.
 @interface XinstaSettingsViewController : UITableViewController
 
+/// Convenience initializer; the controller is always built in code.
 - (instancetype)initWithDataSource:(XinstaSettingsDataSource *)dataSource
-                           adapter:(XinstaIG456Adapter *)adapter NS_DESIGNATED_INITIALIZER;
-- (instancetype)initWithStyle:(UITableViewStyle)style NS_UNAVAILABLE;
-- (instancetype)initWithCoder:(NSCoder *)coder NS_UNAVAILABLE;
+                           adapter:(XinstaIG456Adapter *)adapter;
 
 @end
 
