@@ -21,7 +21,7 @@ permissions:
 jobs:
   unsigned-build:
     name: Compile owned demo app (no signing credentials)
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
