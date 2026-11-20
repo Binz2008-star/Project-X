@@ -122,7 +122,8 @@ def _binary_findings(slices: tuple[MachOSlice, ...], plist_min_os: str | None) -
                 "MAIN_BINARY_ENCRYPTED",
                 "warning",
                 "the App Store encryption region is intact on at least one slice; "
-                "the image cannot be analysed or used as a build input as-is",
+                "static analysis of the protected region is limited and the image "
+                "may not be usable as a build input",
                 {"cryptid": [s.cryptid for s in encrypted]},
             )
         )
@@ -131,8 +132,8 @@ def _binary_findings(slices: tuple[MachOSlice, ...], plist_min_os: str | None) -
             Finding(
                 "MAIN_BINARY_DECRYPTED",
                 "info",
-                "Mach-O encryption flag is cleared, so the image has been decrypted; "
-                "its original signature is therefore void",
+                "Mach-O encryption flag is cleared; static metadata suggests the "
+                "App Store wrapper was removed. Signature validity is not asserted",
                 {"cryptid": [s.cryptid for s in inspected]},
             )
         )
@@ -186,7 +187,8 @@ def _bundle_findings(
             Finding(
                 "UNSIGNED_NESTED_BUNDLE",
                 "warning",
-                "an embedded bundle has no signature; installation will fail unless it is re-signed",
+                "an embedded bundle has no signature metadata; installation may fail "
+                "unless it is re-signed",
                 {"path": path},
             )
         )
@@ -234,8 +236,8 @@ def _dependency_findings(dependencies: DependencyAnalysis) -> list[Finding]:
             Finding(
                 "UNRESOLVED_RPATH_DEPENDENCY",
                 "critical",
-                "the main binary links a framework that is absent from the bundle; "
-                "the app cannot launch in this state",
+                "the main binary statically references a framework that is absent "
+                "from the bundle; launch may fail (weak references may be tolerated)",
                 {"references": list(dependencies.unresolved_rpath_dependencies)},
             )
         )

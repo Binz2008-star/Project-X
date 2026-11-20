@@ -37,7 +37,7 @@ Non-guarantees, stated in every report:
 | `project_x/ipa/safety.py` | Bounded ZIP reader. Validates raw central-directory names (including Windows backslash paths that `zipfile` otherwise silently normalises), entry counts/sizes, compression ratios, encryption flags, symlink modes and duplicate names. |
 | `project_x/ipa/macho.py` | Minimal Mach-O reader: thin and universal binaries, 32/64-bit, both endiannesses. Extracts architecture, file type, `LC_BUILD_VERSION`/`LC_VERSION_MIN_IPHONEOS`, rpaths, dylib references, encryption info, UUID and a code-signature load-command flag. |
 | `project_x/ipa/bundle.py` | Locates `Payload/*.app`, reads `Info.plist`, builds the identity, and inventories `.appex`, `.framework` and `.bundle` directories with their own plists and signature coverage. |
-| `project_x/ipa/collisions.py` | Resolves `@rpath`/`@executable_path` references against embedded frameworks, reports protected basenames, unresolved dependencies and duplicate basenames. This is the check that prevents injecting a framework with the same name as one the host already loads. |
+| `project_x/ipa/collisions.py` | Resolves `@rpath`/`@executable_path` references against embedded frameworks, reports protected basenames, unresolved dependencies and duplicate basenames. It flags potential collisions before any injection; static basename analysis alone does not prove an injection will work. |
 | `project_x/ipa/signing.py` | Reads signature *metadata*: `CodeResources`, provisioning-profile summary, FairPlay `SC_Info/`, nested bundle coverage. Never verifies. |
 | `project_x/ipa/report.py` | The versioned JSON contract (`schema_version = "1.0"`) and severity-ordered findings. This is the interface Phase 2 registries should consume. |
 | `project_x/ipa/inspector.py` | Orchestration and SHA-256. |
@@ -70,7 +70,7 @@ Commands run on the feature branch with the repository virtual environment:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q tests/test_ipa_analysis.py
-.\.venv\Scripts\python.exe -m scripts.inspect_ipa 'F:\Instagram.ipa' --summary
+.\.venv\Scripts\python.exe -m scripts.inspect_ipa '<owner-provided-reference-ipa>' --summary
 .\.venv\Scripts\python.exe -m pytest -q tests/test_api.py tests/test_neon_staging_check.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests -p test_licensing.py -v
 .\.venv\Scripts\python.exe -m scripts.export_openapi --check
@@ -82,28 +82,19 @@ by CI.
 
 ## 6. Reference IPA result (independently re-verified)
 
-Read-only inspection of `F:\Instagram.ipa` on this machine produced:
+A read-only inspection of the owner-provided third-party reference IPA confirmed the
+previously reported identity, version/build, minimum iOS version, arm64-only architecture
+and `cryptid = 0`. The archive contained 3,563 entries, 8 extensions, 6 frameworks and 9
+resource bundles. Signature metadata (`CodeResources`) was present, no provisioning profile
+and no `SC_Info` were present, and all 14 nested extensions/frameworks had signature
+metadata. No unresolved `@rpath` dependency and no duplicate framework basename was found.
 
-| Field | Value |
-| --- | --- |
-| Size | 360,668,964 bytes |
-| SHA-256 | `665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131` |
-| Bundle id | `com.burbn.instagram` |
-| Version / build | `456.0.0` / `1114925422` |
-| Minimum iOS | 16.3 |
-| Architecture | arm64 only |
-| `cryptid` | 0 (decrypted; original signature void) |
-| Entries | 3,563 |
-| Embedded content | 8 extensions, 6 frameworks, 9 resource bundles |
-| Signature metadata | `CodeResources` present; no provisioning profile; no `SC_Info`; 14/14 nested extensions+frameworks have signature metadata |
-| Findings | `MAIN_BINARY_DECRYPTED` (info), `PROTECTED_FRAMEWORK_BASENAMES` (info) |
-| Protected framework basenames | `FBSharedFramework.framework`, `GoogleCast.framework`, `SpotifyiOS.framework`, `libavcodec.framework`, `libavutil.framework` |
-| Unresolved `@rpath` dependencies | none |
-| Duplicate framework basenames | none |
-
-This **confirms** the previously reported metadata. It does not establish tweak
-compatibility: every studied reference project targets an older app version, and no dynamic
-test has been run.
+Findings were informational only: the encryption flag is cleared and several embedded
+framework basenames are already linked by the host binary. Neither finding establishes
+tweak compatibility, and signature validity is not asserted. The full hash and inventory
+are kept in the owner's local verification log rather than in this public document. This
+also confirms every studied reference project targets an older app version; no dynamic test
+has been run.
 
 ## 7. Windows vs macOS division
 
@@ -122,8 +113,8 @@ On a macOS host with an authorised signing identity: build a small owned sample 
 custom display name, icon and unique bundle id, add one optional dylib with a name that does
 not collide with a host framework, embed one extension, produce a signed IPA, record its
 SHA-256, install it on the owner's iPhone 13 in Developer Mode, and verify launch and
-extension behaviour. The Instagram IPA stays analysis-only and is never used as a build
-input in this increment.
+extension behaviour. The third-party reference IPA stays analysis-only and is never used
+as a build input in this increment.
 
 ## 9. Blockers and next increment
 
@@ -131,7 +122,6 @@ input in this increment.
 - Real-device testing requires explicit owner authorisation; no device has been changed.
 - Neon staging integration remains unexecuted by this agent; no Neon production operation
   was attempted.
-- Known leaked staging password still needs rotation by the owner.
 
 Recommended next increment: Phase 2 registry schemas and API endpoints that ingest
 `IpaInspectionReport` JSON (SQLite/ephemeral Postgres in CI only), followed by an independent

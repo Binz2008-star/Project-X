@@ -75,7 +75,7 @@ _EOCD_SIG = b"PK\x05\x06"
 _ZIP64_LOCATOR_SIG = b"PK\x06\x07"
 _ZIP64_EOCD_SIG = b"PK\x06\x06"
 _CENTRAL_SIG = b"PK\x01\x02"
-_MAX_ZIP_COMMENT = 64 * 1024
+_MAX_ZIP_COMMENT = 65535
 _ZIP64_MARKER = 0xFFFFFFFF
 _ZIP64_COUNT_MARKER = 0xFFFF
 
@@ -89,18 +89,43 @@ def raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
     that is what we validate here.
 
     Both classic and ZIP64 end-of-central-directory records are understood;
-    large IPAs routinely use ZIP64 even when they do not need it.
+    large IPAs routinely use ZIP64 even when they do not need it. Structural
+    failures are always reported as :class:`ArchiveSafetyError`, never as a
+    raw ``struct.error`` from a malformed archive.
     """
+    try:
+        return _raw_central_names(path, max_entries)
+    except ArchiveSafetyError:
+        raise
+    except (struct.error, OSError, ValueError) as exc:
+        raise ArchiveSafetyError(
+            "MALFORMED_CENTRAL_DIRECTORY", f"cannot parse central directory: {exc}"
+        ) from exc
+
+
+def _raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
     size = os.path.getsize(path)
     tail_length = min(size, _MAX_ZIP_COMMENT + 22)
+    tail_start = size - tail_length
     with open(path, "rb") as handle:
-        handle.seek(size - tail_length)
+        handle.seek(tail_start)
         tail = handle.read(tail_length)
 
-        eocd = tail.rfind(_EOCD_SIG)
-        if eocd < 0 or eocd + 22 > len(tail):
+        # A signature inside the archive comment must not be mistaken for the
+        # real EOCD. Only a record whose declared comment reaches EOF is valid.
+        eocd = -1
+        candidate = tail.rfind(_EOCD_SIG)
+        while candidate >= 0:
+            if candidate + 22 <= len(tail):
+                comment_length = struct.unpack_from("<H", tail, candidate + 20)[0]
+                if candidate + 22 + comment_length == len(tail):
+                    eocd = candidate
+                    break
+            candidate = tail.rfind(_EOCD_SIG, 0, candidate)
+        if eocd < 0:
             raise ArchiveSafetyError(
-                "MALFORMED_CENTRAL_DIRECTORY", "end of central directory record not found"
+                "MALFORMED_CENTRAL_DIRECTORY",
+                "end of central directory record not found or comment length invalid",
             )
 
         (
@@ -113,6 +138,7 @@ def raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
             cd_offset,
             _comment_length,
         ) = struct.unpack_from("<4s4H2LH", tail, eocd)
+        boundary = tail_start + eocd
 
         if (
             count >= _ZIP64_COUNT_MARKER
@@ -120,11 +146,22 @@ def raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
             or cd_size >= _ZIP64_MARKER
         ):
             locator = tail.rfind(_ZIP64_LOCATOR_SIG, 0, eocd)
-            if locator < 0 or locator + 20 > len(tail):
+            if locator < 0 or locator + 20 != eocd:
                 raise ArchiveSafetyError(
-                    "MALFORMED_CENTRAL_DIRECTORY", "ZIP64 locator not found where expected"
+                    "MALFORMED_CENTRAL_DIRECTORY",
+                    "ZIP64 locator is not immediately before the end of central directory",
                 )
-            _sig, _disk, z64_offset, _disks = struct.unpack_from("<4sLQL", tail, locator)
+            _sig, locator_disk, z64_offset, total_disks = struct.unpack_from(
+                "<4sLQL", tail, locator
+            )
+            if locator_disk != 0 or total_disks != 1:
+                raise ArchiveSafetyError(
+                    "MALFORMED_CENTRAL_DIRECTORY", "multi-disk ZIP64 archives are not supported"
+                )
+            if z64_offset >= size:
+                raise ArchiveSafetyError(
+                    "MALFORMED_CENTRAL_DIRECTORY", "ZIP64 record offset lies outside the archive"
+                )
             handle.seek(z64_offset)
             record = handle.read(56)
             if len(record) != 56 or record[:4] != _ZIP64_EOCD_SIG:
@@ -133,25 +170,40 @@ def raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
                 )
             (
                 _sig,
-                _record_size,
+                record_size,
                 _made_by,
                 _needed,
-                _disk,
-                _cd_disk,
-                _on_disk,
+                disk,
+                cd_disk,
+                on_disk,
                 count,
                 cd_size,
                 cd_offset,
-            ) = struct.unpack_from("<4sQ2H2Q4Q", record, 0)
+            ) = struct.unpack_from("<4sQ2H2L4Q", record, 0)
+            if record_size < 44 or disk != 0 or cd_disk != 0 or on_disk != count:
+                raise ArchiveSafetyError(
+                    "MALFORMED_CENTRAL_DIRECTORY", "invalid ZIP64 end of central directory fields"
+                )
+            boundary = z64_offset
 
         if count > max_entries:
             raise ArchiveSafetyError(
                 "TOO_MANY_ENTRIES", f"central directory lists {count} entries"
             )
+        cd_end = cd_offset + cd_size
+        if cd_offset < 0 or cd_size < 0 or cd_end > boundary:
+            raise ArchiveSafetyError(
+                "MALFORMED_CENTRAL_DIRECTORY", "central directory lies outside the archive"
+            )
 
         names: list[str] = []
         handle.seek(cd_offset)
         for index in range(count):
+            if handle.tell() + 46 > cd_end:
+                raise ArchiveSafetyError(
+                    "MALFORMED_CENTRAL_DIRECTORY",
+                    f"central header {index} extends beyond the central directory",
+                )
             header = handle.read(46)
             if len(header) != 46 or header[:4] != _CENTRAL_SIG:
                 raise ArchiveSafetyError(
@@ -160,6 +212,11 @@ def raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
                 )
             flags = struct.unpack_from("<H", header, 8)[0]
             name_length, extra_length, comment_length = struct.unpack_from("<HHH", header, 28)
+            if handle.tell() + name_length + extra_length + comment_length > cd_end:
+                raise ArchiveSafetyError(
+                    "MALFORMED_CENTRAL_DIRECTORY",
+                    f"entry metadata {index} extends beyond the central directory",
+                )
             raw_name = handle.read(name_length)
             if len(raw_name) != name_length:
                 raise ArchiveSafetyError(
@@ -275,7 +332,7 @@ class SafeArchive:
                 {
                     "code": "DUPLICATE_ENTRY_NAME",
                     "severity": "warning",
-                    "detail": f"{len(duplicates)} duplicate entry name(s); first occurrence is used",
+                    "detail": f"{len(duplicates)} duplicate entry name(s); last occurrence is used",
                     "entries": sorted(duplicates)[:20],
                 }
             )

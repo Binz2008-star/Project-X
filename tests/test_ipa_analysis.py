@@ -18,7 +18,10 @@ import pytest
 from project_x.ipa import ArchiveLimits, ArchiveSafetyError, inspect_ipa
 from project_x.ipa.bundle import BundleError
 from project_x.ipa.report import SCHEMA_VERSION
+from project_x.ipa.safety import raw_central_names
+from scripts.inspect_ipa import main as cli_main
 
+MH_MAGIC = 0xFEEDFACE
 MH_MAGIC_64 = 0xFEEDFACF
 FAT_MAGIC = 0xCAFEBABE
 
@@ -517,3 +520,189 @@ def test_read_limit_blocks_oversized_info_plist(tmp_path: Path):
         {APP + "Info.plist": payload, APP + "Demo": build_macho()},
     )
     _expect_refusal(path, "ENTRY_READ_TOO_LARGE")
+
+
+# --------------------------------------------------------------------------
+# ZIP64 and parser hardening
+# --------------------------------------------------------------------------
+
+
+def _make_zip64(path: Path, entries: dict[str, bytes]) -> Path:
+    """Convert a normal ZIP into a ZIP64 archive without writing 4 GiB."""
+    plain = write_ipa(path.with_name(path.stem + ".plain.ipa"), entries)
+    data = plain.read_bytes()
+    eocd = data.rfind(b"PK\x05\x06")
+    assert eocd > 0
+    _disk, _cd_disk, _on_disk, count, cd_size, cd_offset, comment_length = struct.unpack_from(
+        "<4H2LH", data, eocd + 4
+    )
+    assert comment_length == 0
+
+    zip64_eocd = struct.pack(
+        "<4sQ2H2L4Q",
+        b"PK\x06\x06",
+        44,
+        45,
+        45,
+        0,
+        0,
+        count,
+        count,
+        cd_size,
+        cd_offset,
+    )
+    locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, eocd, 1)
+    markers = struct.pack(
+        "<4s4H2LH",
+        b"PK\x05\x06",
+        0,
+        0,
+        0xFFFF,
+        0xFFFF,
+        0xFFFFFFFF,
+        0xFFFFFFFF,
+        0,
+    )
+    path.write_bytes(data[:eocd] + zip64_eocd + locator + markers)
+    plain.unlink()
+    return path
+
+
+def test_zip64_archive_is_inspected(tmp_path: Path):
+    path = _make_zip64(tmp_path / "Zip64.ipa", base_entries())
+    report = inspect_ipa(path)
+
+    assert report.identity.bundle_id == "com.example.demo"
+    assert report.artifact.entry_count == 3
+    assert [s.arch for s in report.macho_slices] == ["arm64"]
+
+
+def test_fake_eocd_signature_in_comment_is_ignored(tmp_path: Path):
+    path = write_ipa(tmp_path / "comment.ipa", base_entries())
+    fake = struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 1, 1, 0, 0, 5)
+    with zipfile.ZipFile(path, "a") as archive:
+        archive.comment = b"noise" + fake
+
+    # Python's own zipfile follows the last signature and sees no entries, so
+    # this specific case is checked at the raw-parser layer rather than through
+    # the full inspector.
+    names = raw_central_names(str(path), 1000)
+    assert len(names) == len(base_entries())
+    assert APP + "Info.plist" in names
+
+
+def test_raw_parser_refuses_out_of_range_central_directory(tmp_path: Path):
+    path = write_ipa(tmp_path / "badcd.ipa", base_entries())
+    data = bytearray(path.read_bytes())
+    eocd = data.rfind(b"PK\x05\x06")
+    struct.pack_into("<I", data, eocd + 16, len(data) - 1)
+    path.write_bytes(data)
+
+    with pytest.raises(ArchiveSafetyError) as excinfo:
+        raw_central_names(str(path), 1000)
+    assert excinfo.value.code == "MALFORMED_CENTRAL_DIRECTORY"
+
+
+def test_symlink_entry_is_reported(tmp_path: Path):
+    path = tmp_path / "symlink.ipa"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in base_entries().items():
+            archive.writestr(name, data)
+        info = zipfile.ZipInfo(APP + "link")
+        info.create_system = 3
+        info.external_attr = 0o120777 << 16
+        archive.writestr(info, b"Demo")
+
+    assert "SYMLINK_ENTRY" in finding_codes(inspect_ipa(path))
+
+
+def test_unsupported_compression_is_refused(tmp_path: Path):
+    path = write_ipa(tmp_path / "method.ipa", base_entries())
+    data = bytearray(path.read_bytes())
+    central = data.find(b"PK\x01\x02")
+    assert central > 0
+    struct.pack_into("<H", data, central + 10, 99)
+    path.write_bytes(data)
+
+    _expect_refusal(path, "UNSUPPORTED_COMPRESSION")
+
+
+def test_total_uncompressed_size_limit_is_enforced(tmp_path: Path):
+    path = write_ipa(tmp_path / "total.ipa", base_entries())
+    _expect_refusal(path, "ARCHIVE_TOO_LARGE", ArchiveLimits(max_total_uncompressed_bytes=128))
+
+
+# --------------------------------------------------------------------------
+# Mach-O edge cases
+# --------------------------------------------------------------------------
+
+
+def test_invalid_dylib_name_offset_marks_binary_unparseable(tmp_path: Path):
+    body = struct.pack("<IIIIII", LC_LOAD_DYLIB, 24, 0, 0, 0, 0)
+    header = struct.pack(
+        "<IiiIIIII", MH_MAGIC_64, CPU_ARM64, 0, MH_EXECUTE, 1, len(body), 0, 0
+    )
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", base_entries(executable=header + body)))
+
+    assert "MAIN_BINARY_UNPARSEABLE" in finding_codes(report)
+
+
+def test_32_bit_big_endian_macho_is_parsed(tmp_path: Path):
+    blob = struct.pack(">IiiIIII", MH_MAGIC, CPU_ARM64, 0, MH_EXECUTE, 0, 0, 0)
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", base_entries(executable=blob)))
+
+    slc = report.macho_slices[0]
+    assert slc.is_64 is False
+    assert slc.arch == "arm64"
+    assert slc.file_type_name == "MH_EXECUTE"
+
+
+def test_fat_cigam_container_is_parsed(tmp_path: Path):
+    thin = build_macho()
+    # FAT_CIGAM on disk is the little-endian encoding of FAT_MAGIC; our reader
+    # sees it as a byte-swapped fat header and parses the fields little-endian.
+    header = struct.pack("<II", FAT_MAGIC, 1) + struct.pack(
+        "<iiIII", CPU_ARM64, 0, 4096, len(thin), 12
+    )
+    blob = header + b"\x00" * (4096 - len(header)) + thin
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", base_entries(executable=blob)))
+
+    assert len(report.macho_slices) == 1
+    assert report.macho_slices[0].arch == "arm64"
+
+
+# --------------------------------------------------------------------------
+# CLI never writes to the input archive
+# --------------------------------------------------------------------------
+
+
+def test_cli_refuses_report_path_equal_to_input(tmp_path: Path, capsys):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    before = path.read_bytes()
+
+    assert cli_main([str(path), "--json", str(path), "--summary"]) == 2
+    assert path.read_bytes() == before
+    assert "OUTPUT_COLLIDES_WITH_INPUT" in capsys.readouterr().err
+
+
+def test_cli_refuses_report_path_hardlinked_to_input(tmp_path: Path, capsys):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    alias = tmp_path / "alias.ipa"
+    try:
+        os.link(path, alias)
+    except OSError:
+        pytest.skip("hard links are unavailable on this filesystem")
+    before = path.read_bytes()
+
+    assert cli_main([str(path), "--json", str(alias)]) == 2
+    assert path.read_bytes() == before
+    assert "OUTPUT_COLLIDES_WITH_INPUT" in capsys.readouterr().err
+
+
+def test_analysis_does_not_modify_input(tmp_path: Path):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    before = (path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_size)
+
+    inspect_ipa(path)
+
+    assert (path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_size) == before

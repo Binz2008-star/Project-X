@@ -208,12 +208,21 @@ def _parse_slice(blob: bytes) -> MachOSlice:
         if cmd in _DYLIB_COMMANDS:
             if cmdsize >= 12:
                 name_offset = struct.unpack_from(endian + "I", blob, offset + 8)[0]
+                # A dylib_command has a 24-byte fixed header; the string offset
+                # must point into the remaining payload, never into the header.
+                if name_offset < 24 or name_offset >= cmdsize:
+                    raise MachOError(f"dylib name offset {name_offset} outside load command")
                 dylibs.append(
-                    DylibRef(_read_cstring(blob, offset + name_offset, command_end), _DYLIB_COMMANDS[cmd])
+                    DylibRef(
+                        _read_cstring(blob, offset + name_offset, command_end),
+                        _DYLIB_COMMANDS[cmd],
+                    )
                 )
         elif cmd == LC_RPATH:
             if cmdsize >= 12:
                 path_offset = struct.unpack_from(endian + "I", blob, offset + 8)[0]
+                if path_offset < 12 or path_offset >= cmdsize:
+                    raise MachOError(f"rpath offset {path_offset} outside load command")
                 rpaths.append(_read_cstring(blob, offset + path_offset, command_end))
         elif cmd in (LC_ENCRYPTION_INFO, LC_ENCRYPTION_INFO_64):
             if cmdsize >= 20:

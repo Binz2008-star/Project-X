@@ -1,11 +1,11 @@
 """Framework and dependency reference analysis.
 
 The rule this module exists to enforce came from a real failure mode: an app
-that vendors a framework (Instagram ships ``libavcodec.framework`` and
-``libavutil.framework``) will break if a build injects another framework with
+that vendors a framework can break if a build injects another framework with
 the same basename, because the loader resolves ``@rpath/<name>`` to whichever
-copy is present. Injection is only safe when the new framework's basename does
-not collide with anything the host binary already links.
+copy is present. A colliding basename is therefore a build risk that must be
+resolved before any injection is attempted; static basename analysis alone
+does not prove that a collision-free injection will work.
 """
 from __future__ import annotations
 

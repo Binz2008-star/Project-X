@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -21,6 +22,21 @@ def _limits_from_args(args) -> ArchiveLimits | None:
     if args.max_entries is not None:
         overrides["max_entries"] = args.max_entries
     return ArchiveLimits(**overrides) if overrides else None
+
+
+def _output_collides(input_path: str, output_path: str) -> bool:
+    """True when writing ``output_path`` could overwrite the input archive."""
+    source = Path(input_path)
+    target = Path(output_path)
+    try:
+        if source.resolve() == target.resolve():
+            return True
+    except OSError:
+        pass
+    try:
+        return os.path.samefile(source, target)
+    except OSError:
+        return False
 
 
 def _summary(report) -> str:
@@ -70,6 +86,13 @@ def main(argv: list[str] | None = None) -> int:
         help="exit with status 1 when any critical finding is present",
     )
     args = parser.parse_args(argv)
+
+    if args.json_out and _output_collides(args.ipa, args.json_out):
+        print(
+            "REFUSED [OUTPUT_COLLIDES_WITH_INPUT] the report path is the input archive",
+            file=sys.stderr,
+        )
+        return 2
 
     try:
         report = inspect_ipa(
