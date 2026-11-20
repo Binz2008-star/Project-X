@@ -118,7 +118,7 @@ No merge or deployment is implied by this approval. PR #9 remains DRAFT pending 
 ## Outstanding risks and next milestone
 
 1. Independent review is complete: first pass `REQUEST CHANGES`, re-review **APPROVE** with no remaining findings. Owner authorization is still required for any merge or later integration stage.
-2. The analyzer that emits the report lives in the separate Draft PR #7 and is not imported here; integration is by the pinned `schema_version = "1.0"` contract and synthetic payloads only. An end-to-end test with real analyzer output is pending until the branches converge.
+2. The analyzer that emits the report lives in the separate Draft PR #7 and is not imported here; integration is by the pinned `schema_version = "1.0"` contract and synthetic payloads only. A follow-up stacked increment brings the analyzer into the same tree and tests real analyzer output end to end; see `docs/INTEGRATION_READINESS.md`.
 3. An owner-owned, buildable iOS test application must exist before any real integration rehearsal. The fictional `demo.owned` identity is only a contract fixture.
 4. Signing identity, provisioning profile, registered UDID, and written device-authorization scope remain unavailable — all plan steps that need them stay `blocked`.
 5. No approved injection/implantation method or verified hook path exists; X Settings remains a standalone simulator-tested controller.
