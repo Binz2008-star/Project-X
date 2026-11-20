@@ -15,7 +15,7 @@ The tool consumes JSON only. It never opens an IPA, never extracts, writes, sign
 | `project_x/buildmanager/__init__.py` | Public exports for the preflight API. |
 | `project_x/buildmanager/preflight.py` | Manifest parsing, fail-closed policy checks, deterministic plan builder. |
 | `scripts/build_manager_preflight.py` | CLI; prints one JSON document to stdout and exits 0/1/2. |
-| `tests/test_build_manager_preflight.py` | 40 synthetic-payload tests; no third-party IPA or credential needed. |
+| `tests/test_build_manager_preflight.py` | 41 synthetic-payload tests; no third-party IPA or credential needed. |
 | `.github/workflows/ci.yml` | Adds the preflight test step to the existing isolated CI job. |
 | `docs/IPA_BUILD_MANAGER.md` | This document. |
 
@@ -85,8 +85,9 @@ Exit codes: `0` preflight passed, `2` preflight rejected, `1` input unreadable o
 
 ## Verification
 
-- Local: `40 passed` for `tests/test_build_manager_preflight.py` on Python 3.14 (2026-11-21).
-- CI: add run IDs here after the first workflow run on this branch.
+- Local: `41 passed` for `tests/test_build_manager_preflight.py` on Python 3.14.7 (2026-11-21). Combined run with the API suites: `71 passed, 29 skipped`. Legacy licensing `OK (7 tests)`; `OpenAPI schema matches implementation`; `git diff --check` clean.
+- CI final head `d600c2039aadc7e56194ea4618f8c74d0cfca029`: push run `44835102952` **SUCCESS** — `41 passed` preflight, `58 passed` API, `2 passed` staging guard, `Ran 7 tests` licensing, both Alembic checks `No new upgrade operations detected.`, `OpenAPI schema matches implementation`. PR-level run `44835108953` **SUCCESS** on the same head with the same counts.
+- Earlier commit `fe31227` runs `44834952866` (push) and `44834992322` (PR) also succeeded; they are superseded by the final-head runs above.
 
 ## Security and compatibility considerations
 
