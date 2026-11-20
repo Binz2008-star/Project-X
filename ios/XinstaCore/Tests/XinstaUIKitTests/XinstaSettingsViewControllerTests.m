@@ -2,13 +2,13 @@
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
 
-#import <XinstaCore/XinstaCompatibility.h>
-#import <XinstaCore/XinstaFeature.h>
-#import <XinstaCore/XinstaFeatureRegistry.h>
-#import <XinstaCore/XinstaHostMetadata.h>
-#import <XinstaCore/XinstaSettingsDataSource.h>
-#import <XinstaAdapter/XinstaIG456Adapter.h>
-#import <XinstaUI/XinstaSettingsViewController.h>
+#import "XinstaCompatibility.h"
+#import "XinstaFeature.h"
+#import "XinstaFeatureRegistry.h"
+#import "XinstaHostMetadata.h"
+#import "XinstaSettingsDataSource.h"
+#import "XinstaIG456Adapter.h"
+#import "XinstaSettingsViewController.h"
 
 @interface XinstaSettingsViewController (XinstaTesting)
 - (void)toggleChanged:(UISwitch *)sender;

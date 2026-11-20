@@ -33,7 +33,12 @@ let package = Package(
         .testTarget(
             name: "XinstaUIKitTests",
             dependencies: ["XinstaCore", "XinstaAdapter", "XinstaUI"],
-            path: "Tests/XinstaUIKitTests"
+            path: "Tests/XinstaUIKitTests",
+            cSettings: [
+                .headerSearchPath("../../Sources/Core"),
+                .headerSearchPath("../../Sources/Adapter"),
+                .headerSearchPath("../../Sources/UI")
+            ]
         )
     ]
 )
