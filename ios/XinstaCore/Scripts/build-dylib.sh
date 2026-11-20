@@ -79,8 +79,14 @@ fi
 
 LOAD_COMMANDS="$(otool -l "$ARTIFACT")"
 if grep -q 'LC_BUILD_VERSION' <<<"$LOAD_COMMANDS"; then
-  if ! grep -q 'platform IPHONEOS' <<<"$LOAD_COMMANDS"; then
-    echo "ERROR: LC_BUILD_VERSION platform is not IPHONEOS" >&2
+  BUILD_VERSION_BLOCK="$(grep -A 6 'LC_BUILD_VERSION' <<<"$LOAD_COMMANDS")"
+  echo "--- LC_BUILD_VERSION ---"
+  echo "$BUILD_VERSION_BLOCK"
+  echo "-------------------------"
+  # otool renders the platform either symbolically (IPHONEOS) or numerically
+  # (2 == PLATFORM_IOS); accept either, with flexible whitespace.
+  if ! grep -qE 'platform[[:space:]]+(IPHONEOS|2)([[:space:]]|$)' <<<"$BUILD_VERSION_BLOCK"; then
+    echo "ERROR: LC_BUILD_VERSION platform is not iOS" >&2
     exit 1
   fi
 elif ! grep -q 'LC_VERSION_MIN_IPHONEOS' <<<"$LOAD_COMMANDS"; then
