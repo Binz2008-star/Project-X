@@ -50,19 +50,17 @@ final class FeatureStore: ObservableObject {
     @Published private(set) var enabled: Set<String>
 
     private let defaults: UserDefaults
-    private let storageKey = "projectx.demo.enabledFeatures"
+    private let storageKey = "projectx.demo.featureOverrides"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        if let saved = defaults.array(forKey: storageKey) as? [String] {
-            self.enabled = Set(saved)
-        } else {
-            self.enabled = Set(
-                FeatureRegistry.modules
-                    .filter { $0.isEnabledByDefault }
-                    .map(\.id)
-            )
-        }
+        let overrides = defaults.dictionary(forKey: storageKey) ?? [:]
+        self.enabled = Set(
+            FeatureRegistry.modules.filter { module in
+                (overrides[module.id] as? Bool) ?? module.isEnabledByDefault
+            }
+            .map(\.id)
+        )
     }
 
     func isEnabled(_ id: String) -> Bool {
@@ -75,6 +73,8 @@ final class FeatureStore: ObservableObject {
         } else {
             enabled.remove(id)
         }
-        defaults.set(enabled.sorted(), forKey: storageKey)
+        var overrides = defaults.dictionary(forKey: storageKey) ?? [:]
+        overrides[id] = value
+        defaults.set(overrides, forKey: storageKey)
     }
 }

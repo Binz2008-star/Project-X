@@ -32,7 +32,7 @@ struct XSettingsView: View {
             }
 
             Section("Signing") {
-                Text("This binary is unsigned. Installing it on an iPhone requires an authorised signing identity, a matching provisioning profile and Developer Mode on the device. See docs/IOS_DEMO_APP.md.")
+                Text("Signing status depends on how this binary was built. The CI verification build is unsigned; installing any build on an iPhone requires an authorised signing identity, a matching provisioning profile and Developer Mode on the device. See docs/IOS_DEMO_APP.md.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }

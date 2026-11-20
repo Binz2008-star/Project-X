@@ -35,7 +35,7 @@ The root screen contains a navigation link labelled **X Settings**. That screen 
 
 ### Modular feature registry
 
-`FeatureModule` is a small protocol (`id`, `title`, `summary`, `isEnabledByDefault`). `FeatureRegistry.modules` is the single place where features are declared; adding a module automatically adds it to the settings list and to `UserDefaults`-backed persistence via `FeatureStore`. The bundled modules are `diagnostics`, `appearance` and `localOptions` — all owned, inert demonstration flags.
+`FeatureModule` is a small protocol (`id`, `title`, `summary`, `isEnabledByDefault`). `FeatureRegistry.modules` is the single place where features are declared; adding a module automatically adds it to the settings list. `FeatureStore` persists only explicit user overrides in `UserDefaults`, so a newly added default-enabled module works without clearing earlier preferences. The bundled modules are `diagnostics`, `appearance` and `localOptions` — all owned, inert demonstration flags.
 
 Bundle identifier: `com.projectx.demo`. Deployment target: iOS 16.0. Devices: iPhone and iPad. Swift 5.0, SwiftUI, no third-party dependencies.
 
@@ -48,7 +48,7 @@ The owner's PC runs Windows and has no Xcode. Therefore:
 3. A macOS runner executes `xcodebuild` for the iOS Simulator SDK with signing disabled, verifies the generated `DemoApp.app`, reads `Info.plist` and records a SHA-256 in the build log.
 4. The licensing backend workflow `ci.yml` is unchanged; the two workflows have separate names, triggers and jobs.
 
-The workflow uses no secrets, no Apple ID, no team ID and no provisioning profile. It can be triggered manually with `workflow_dispatch` as well.
+The workflow uses no secrets, no Apple ID, no team ID and no provisioning profile. It can be triggered manually with `workflow_dispatch` as well. The Xcode target defaults now permit automatic signing; the CI command explicitly overrides signing off, so this workflow remains credential-free and the same project can be signed later on a Mac.
 
 To reproduce locally on a Mac:
 
@@ -83,17 +83,19 @@ This proves compilation only. The workflow did not launch a simulator or install
 
 ## 5. Exact requirements for a future physical-iPhone test
 
-A simulator build cannot be installed on an iPhone. Signing must happen on a Mac with Xcode, using an identity that is never committed to this repository.
+A simulator build cannot be installed on an iPhone. Signing must happen on a Mac with Xcode, using an identity that is never committed to this repository. The device must run **iOS 16.0 or newer**, matching `IPHONEOS_DEPLOYMENT_TARGET = 16.0`.
 
 ### Option A — free Apple ID, direct Xcode install (lowest friction)
 
-1. A macOS host with Xcode 15 or newer.
-2. Sign in with an Apple ID in Xcode; choose **Personal Team** for the target.
-3. Connect the iPhone 13 by USB and trust the computer when prompted.
-4. On the phone: **Settings → Privacy & Security → Developer Mode → Enable**, then restart and confirm. Required for developer-signed apps on modern iOS.
-5. In Xcode, select the connected device as the run destination and press Run. Xcode creates a development certificate and provisioning profile locally (in the keychain and Xcode account data, **not** in Git).
-6. The installed app is valid for roughly **7 days** with a free account and must be rebuilt/reinstalled after expiry.
-7. Change `PRODUCT_BUNDLE_IDENTIFIER` to a globally unique value owned by the owner before this step; `com.projectx.demo` may already be in use by another developer.
+1. A macOS host with Xcode 15 or newer and an iPhone 13 running iOS 16.0+.
+2. Change `PRODUCT_BUNDLE_IDENTIFIER` to a globally unique value owned by the owner before this step; `com.projectx.demo` may already be in use by another developer.
+3. Open `ios/DemoApp/DemoApp.xcodeproj`, select the **DemoApp** target, open **Signing & Capabilities**, tick **Automatically manage signing**, and choose **Personal Team** after signing in with an Apple ID. The project target already uses `CODE_SIGNING_ALLOWED = YES` and `CODE_SIGN_STYLE = Automatic`; no repository secret is needed.
+4. Connect the iPhone 13 by USB and trust the computer when prompted.
+5. On the phone: **Settings → Privacy & Security → Developer Mode → Enable**, then restart and confirm. Required for developer-signed apps on modern iOS.
+6. In Xcode, select the connected device as the run destination and press Run. Xcode creates a development certificate and provisioning profile locally (in the keychain and Xcode account data, **not** in Git).
+7. The installed app is valid for roughly **7 days** with a free account and must be rebuilt/reinstalled after expiry.
+
+For a command-line build instead of the Xcode UI, pass the identity values at invocation time, for example `xcodebuild ... CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM=<team-id> PRODUCT_BUNDLE_IDENTIFIER=<unique-bundle-id> -allowProvisioningDeviceRegistration`. Never commit those values.
 
 ### Option B — paid Apple Developer Program
 
@@ -102,8 +104,9 @@ A simulator build cannot be installed on an iPhone. Signing must happen on a Mac
 3. The iPhone's UDID registered in the account (for development/ad-hoc profiles).
 4. A development or distribution certificate in the Mac keychain, with the private key protected there.
 5. A matching **Development** or **Ad Hoc** provisioning profile containing the registered device.
-6. `xcodebuild archive` followed by export with an `exportOptions.plist` whose method is `development` or `ad-hoc`; install via Xcode, Apple Configurator or the Apple Devices app.
-7. Development builds last up to one year; ad-hoc builds remain installable until the certificate/profile expires, but require re-signing after adding new devices.
+6. In Xcode, disable **Automatically manage signing** for the **DemoApp** target and select the imported certificate and matching profile; this corresponds to `CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=<team-id> PROVISIONING_PROFILE_SPECIFIER=<profile-name> PRODUCT_BUNDLE_IDENTIFIER=<bundle-id>`.
+7. `xcodebuild archive` followed by export with an `exportOptions.plist` whose method is `development` or `ad-hoc`; install via Xcode, Apple Configurator or the Apple Devices app.
+8. Development builds last up to one year; ad-hoc builds remain installable until the certificate/profile expires, but require re-signing after adding new devices.
 
 ### Option C — TestFlight (no jailbreak, no UDID registration)
 

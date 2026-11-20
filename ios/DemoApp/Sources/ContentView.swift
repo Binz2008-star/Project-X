@@ -25,8 +25,8 @@ struct ContentView: View {
                 }
 
                 Section("Build") {
-                    LabeledContent("Configuration", value: "Unsigned simulator build")
-                    Text("Compilation is verified by the isolated macOS workflow; this build is not installable on a physical iPhone.")
+                    LabeledContent("Verification", value: "macOS compile check")
+                    Text("The CI verification binary is unsigned and was not launched. A physical-device build must be signed separately.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
