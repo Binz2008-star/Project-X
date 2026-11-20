@@ -1,0 +1,519 @@
+"""Tests for the read-only IPA analysis engine.
+
+Every fixture is synthesised here: a minimal but structurally real Mach-O header
+plus a ZIP container. No third-party IPA is committed, referenced or required.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import plistlib
+import struct
+import zipfile
+from pathlib import Path
+
+import pytest
+
+from project_x.ipa import ArchiveLimits, ArchiveSafetyError, inspect_ipa
+from project_x.ipa.bundle import BundleError
+from project_x.ipa.report import SCHEMA_VERSION
+
+MH_MAGIC_64 = 0xFEEDFACF
+FAT_MAGIC = 0xCAFEBABE
+
+LC_BUILD_VERSION = 0x32
+LC_RPATH = 0x8000001C
+LC_LOAD_DYLIB = 0xC
+LC_ID_DYLIB = 0xD
+LC_ENCRYPTION_INFO_64 = 0x2C
+
+CPU_ARM64 = 0x0100000C
+CPU_X86_64 = 0x01000007
+
+MH_EXECUTE = 2
+MH_DYLIB = 6
+
+APP = "Payload/Demo.app/"
+
+DEFAULT_INFO = {
+    "CFBundleIdentifier": "com.example.demo",
+    "CFBundleName": "Demo",
+    "CFBundleDisplayName": "Demo",
+    "CFBundleShortVersionString": "1.0",
+    "CFBundleVersion": "42",
+    "MinimumOSVersion": "16.0",
+    "CFBundleExecutable": "Demo",
+    "UIDeviceFamily": [1],
+    "CFBundleSupportedPlatforms": ["iPhoneOS"],
+}
+
+
+# --------------------------------------------------------------------------
+# Mach-O fixture builder
+# --------------------------------------------------------------------------
+
+
+def _align(value: int, alignment: int = 8) -> int:
+    return (value + alignment - 1) // alignment * alignment
+
+
+def _encode_version(text: str) -> int:
+    parts = [int(p) for p in text.split(".")] + [0, 0, 0]
+    return (parts[0] << 16) | (parts[1] << 8) | parts[2]
+
+
+def _build_version_command(min_os: str, sdk: str = "16.3") -> bytes:
+    return struct.pack(
+        "<IIIIII", LC_BUILD_VERSION, 24, 2, _encode_version(min_os), _encode_version(sdk), 0
+    )
+
+
+def _rpath_command(path: str) -> bytes:
+    raw = path.encode() + b"\x00"
+    header = 12
+    size = _align(header + len(raw))
+    return struct.pack("<III", LC_RPATH, size, header) + raw.ljust(size - header, b"\x00")
+
+
+def _dylib_command(command: int, name: str) -> bytes:
+    raw = name.encode() + b"\x00"
+    header = 24
+    size = _align(header + len(raw))
+    return (
+        struct.pack("<IIIIII", command, size, header, 0, 0, 0)
+        + raw.ljust(size - header, b"\x00")
+    )
+
+
+def _encryption_command(cryptid: int, cryptsize: int = 4096) -> bytes:
+    return struct.pack("<IIIIII", LC_ENCRYPTION_INFO_64, 24, 0, cryptsize, cryptid, 0)
+
+
+def build_macho(
+    *,
+    dylibs: tuple[tuple[str, int], ...] = (),
+    rpaths: tuple[str, ...] = (),
+    cryptid: int | None = None,
+    min_os: str | None = "16.3",
+    file_type: int = MH_EXECUTE,
+    cpu_type: int = CPU_ARM64,
+) -> bytes:
+    commands: list[bytes] = []
+    if min_os:
+        commands.append(_build_version_command(min_os))
+    for path in rpaths:
+        commands.append(_rpath_command(path))
+    for name, command in dylibs:
+        commands.append(_dylib_command(command, name))
+    if cryptid is not None:
+        commands.append(_encryption_command(cryptid))
+
+    body = b"".join(commands)
+    header = struct.pack(
+        "<IiiIIIII", MH_MAGIC_64, cpu_type, 0, file_type, len(commands), len(body), 0, 0
+    )
+    return header + body
+
+
+def build_universal(slices: list[bytes]) -> bytes:
+    count = len(slices)
+    offset = _align(8 + 20 * count, 4096)
+    entries: list[tuple[int, int, int, int]] = []
+    payload = b""
+    cursor = offset
+    for blob in slices:
+        cpu_type, cpu_subtype = struct.unpack_from("<ii", blob, 4)
+        entries.append((cpu_type, cpu_subtype, cursor, len(blob)))
+        cursor += len(blob)
+        padding = _align(cursor, 4096) - cursor
+        payload += blob + b"\x00" * padding
+        cursor += padding
+
+    header = struct.pack(">II", FAT_MAGIC, count)
+    for cpu_type, cpu_subtype, slice_offset, size in entries:
+        header += struct.pack(">iiIII", cpu_type, cpu_subtype, slice_offset, size, 12)
+    return header + b"\x00" * (offset - len(header)) + payload
+
+
+# --------------------------------------------------------------------------
+# IPA fixture builder
+# --------------------------------------------------------------------------
+
+
+def base_entries(
+    *,
+    executable: bytes | None = None,
+    info: dict | None = None,
+) -> dict[str, bytes]:
+    return {
+        APP + "Info.plist": plistlib.dumps(info or DEFAULT_INFO, fmt=plistlib.FMT_BINARY),
+        APP + "Demo": executable if executable is not None else build_macho(),
+        APP + "_CodeSignature/CodeResources": b"<plist/>",
+    }
+
+
+def write_ipa(path: Path, entries: dict[str, bytes]) -> Path:
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in entries.items():
+            archive.writestr(name, data)
+    return path
+
+
+def finding_codes(report) -> set[str]:
+    return {finding.code for finding in report.findings}
+
+
+def finding(report, code: str):
+    return next((f for f in report.findings if f.code == code), None)
+
+
+@pytest.fixture()
+def demo_ipa(tmp_path: Path) -> Path:
+    return write_ipa(tmp_path / "Demo.ipa", base_entries())
+
+
+# --------------------------------------------------------------------------
+# Identity, hashing and structure
+# --------------------------------------------------------------------------
+
+
+def test_identity_hash_and_architecture(demo_ipa: Path):
+    report = inspect_ipa(demo_ipa, generated_at="2026-01-01T00:00:00Z")
+
+    assert report.identity.bundle_id == "com.example.demo"
+    assert report.identity.version == "1.0"
+    assert report.identity.build_number == "42"
+    assert report.identity.minimum_os == "16.0"
+    assert report.identity.executable == "Demo"
+    assert report.identity.device_families == (1,)
+
+    expected = hashlib.sha256(demo_ipa.read_bytes()).hexdigest()
+    assert report.artifact.sha256 == expected
+    assert report.artifact.file_name == "Demo.ipa"
+    assert report.artifact.size_bytes == demo_ipa.stat().st_size
+
+    assert [s.arch for s in report.macho_slices] == ["arm64"]
+    assert report.macho_slices[0].file_type_name == "MH_EXECUTE"
+
+
+def test_report_is_json_serialisable_with_versioned_schema(demo_ipa: Path):
+    report = inspect_ipa(demo_ipa, generated_at="2026-01-01T00:00:00Z")
+    payload = report.to_dict()
+
+    assert payload["schema_version"] == SCHEMA_VERSION
+    assert payload["generated_at"] == "2026-01-01T00:00:00Z"
+    assert payload["analyzer"]["name"] == "project-x-ipa"
+    assert payload["macho"]["architectures"] == ["arm64"]
+    assert payload["interpretation"]["malware_verdict"] is None
+    assert "not evidence" in payload["interpretation"]["note"]
+
+    round_tripped = json.loads(report.to_json())
+    assert round_tripped == payload
+
+
+def test_sha256_can_be_skipped(demo_ipa: Path):
+    report = inspect_ipa(demo_ipa, compute_sha256=False)
+    assert report.artifact.sha256 is None
+
+
+def test_report_contains_no_local_paths(demo_ipa: Path, tmp_path: Path):
+    report = inspect_ipa(demo_ipa)
+    text = report.to_json()
+    assert str(tmp_path) not in text
+    assert "\\\\" not in text
+
+
+# --------------------------------------------------------------------------
+# Mach-O level findings
+# --------------------------------------------------------------------------
+
+
+def test_decrypted_binary_is_reported_not_trusted(tmp_path: Path):
+    entries = base_entries(executable=build_macho(cryptid=0))
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert report.macho_slices[0].encrypted is False
+    assert "MAIN_BINARY_DECRYPTED" in finding_codes(report)
+    assert "MAIN_BINARY_ENCRYPTED" not in finding_codes(report)
+    assert report.signing.verification["verified"] is False
+
+
+def test_encrypted_binary_is_flagged(tmp_path: Path):
+    entries = base_entries(executable=build_macho(cryptid=1))
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert report.macho_slices[0].encrypted is True
+    assert "MAIN_BINARY_ENCRYPTED" in finding_codes(report)
+
+
+def test_missing_encryption_command_is_neither_claim(tmp_path: Path):
+    entries = base_entries(executable=build_macho(cryptid=None))
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert report.macho_slices[0].cryptid is None
+    assert "MAIN_BINARY_DECRYPTED" not in finding_codes(report)
+    assert "MAIN_BINARY_ENCRYPTED" not in finding_codes(report)
+
+
+def test_universal_binary_lists_every_architecture(tmp_path: Path):
+    blob = build_universal([build_macho(cpu_type=CPU_ARM64), build_macho(cpu_type=CPU_X86_64)])
+    entries = base_entries(executable=blob)
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    payload = report.to_dict()
+    assert payload["macho"]["is_universal"] is True
+    assert payload["macho"]["architectures"] == ["arm64", "x86_64"]
+    assert "NON_ARM64_ARCHITECTURE" in finding_codes(report)
+
+
+def test_minimum_os_disagreement_is_reported(tmp_path: Path):
+    entries = base_entries(executable=build_macho(min_os="16.3"))
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert report.identity.minimum_os == "16.0"
+    assert report.macho_slices[0].min_os == "16.3"
+    code = finding(report, "MIN_OS_MISMATCH")
+    assert code is not None
+    assert code.context["plist"] == "16.0"
+
+
+def test_missing_executable_is_critical(tmp_path: Path):
+    entries = base_entries()
+    entries.pop(APP + "Demo")
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert finding(report, "EXECUTABLE_NOT_PRESENT").severity == "critical"
+
+
+# --------------------------------------------------------------------------
+# Embedded content inventory
+# --------------------------------------------------------------------------
+
+
+def test_extension_inventory_and_signature_coverage(tmp_path: Path):
+    entries = base_entries()
+    entries[APP + "PlugIns/Widget.appex/Info.plist"] = plistlib.dumps(
+        {
+            "CFBundleIdentifier": "com.example.demo.widget",
+            "CFBundleExecutable": "Widget",
+            "CFBundleName": "Widget",
+        },
+        fmt=plistlib.FMT_BINARY,
+    )
+    entries[APP + "PlugIns/Widget.appex/Widget"] = build_macho(file_type=MH_EXECUTE)
+    entries[APP + "PlugIns/Widget.appex/_CodeSignature/CodeResources"] = b"<plist/>"
+    entries[APP + "BCNRefreshSounds.bundle/sound.caf"] = b"\x00" * 16
+
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+    payload = report.to_dict()
+
+    assert payload["bundles"]["counts"]["extensions"] == 1
+    assert payload["bundles"]["counts"]["resource_bundles"] == 1
+    extension = payload["bundles"]["extensions"][0]
+    assert extension["bundle_id"] == "com.example.demo.widget"
+    assert extension["has_code_signature"] is True
+    assert extension["executable_present"] is True
+
+    assert report.signing.nested_bundles_total == 1
+    assert report.signing.nested_bundles_signed == 1
+    assert "UNSIGNED_NESTED_BUNDLE" not in finding_codes(report)
+
+
+def test_unsigned_nested_bundle_is_reported(tmp_path: Path):
+    entries = base_entries()
+    entries[APP + "PlugIns/Widget.appex/Info.plist"] = plistlib.dumps(
+        {"CFBundleIdentifier": "com.example.demo.widget", "CFBundleExecutable": "Widget"},
+        fmt=plistlib.FMT_BINARY,
+    )
+    entries[APP + "PlugIns/Widget.appex/Widget"] = build_macho()
+
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert report.signing.nested_bundles_unsigned == (APP + "PlugIns/Widget.appex/",)
+    assert finding(report, "UNSIGNED_NESTED_BUNDLE").severity == "warning"
+
+
+def test_extension_with_foreign_identifier_is_reported(tmp_path: Path):
+    entries = base_entries()
+    entries[APP + "PlugIns/Other.appex/Info.plist"] = plistlib.dumps(
+        {"CFBundleIdentifier": "com.other.thing", "CFBundleExecutable": "Other"},
+        fmt=plistlib.FMT_BINARY,
+    )
+    entries[APP + "PlugIns/Other.appex/Other"] = build_macho()
+    entries[APP + "PlugIns/Other.appex/_CodeSignature/CodeResources"] = b"<plist/>"
+
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert "UNEXPECTED_EXTENSION_IDENTIFIER" in finding_codes(report)
+
+
+# --------------------------------------------------------------------------
+# Dependency and collision analysis
+# --------------------------------------------------------------------------
+
+
+def test_framework_linked_by_host_is_protected(tmp_path: Path):
+    entries = base_entries(
+        executable=build_macho(
+            dylibs=(("@rpath/libavcodec.framework/libavcodec", LC_LOAD_DYLIB),)
+        )
+    )
+    entries[APP + "Frameworks/libavcodec.framework/libavcodec"] = build_macho(
+        dylibs=(("@rpath/libavcodec.framework/libavcodec", LC_ID_DYLIB),),
+        file_type=MH_DYLIB,
+        min_os=None,
+    )
+
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert report.dependencies.protected_frameworks == ("libavcodec.framework",)
+    assert report.dependencies.unresolved_rpath_dependencies == ()
+    assert "PROTECTED_FRAMEWORK_BASENAMES" in finding_codes(report)
+
+    framework = report.dependencies.frameworks[0]
+    assert framework.install_name == "@rpath/libavcodec.framework/libavcodec"
+
+
+def test_unresolved_rpath_dependency_is_critical(tmp_path: Path):
+    entries = base_entries(
+        executable=build_macho(dylibs=(("@rpath/Missing.framework/Missing", LC_LOAD_DYLIB),))
+    )
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert report.dependencies.unresolved_rpath_dependencies == ("@rpath/Missing.framework/Missing",)
+    assert finding(report, "UNRESOLVED_RPATH_DEPENDENCY").severity == "critical"
+
+
+def test_duplicate_framework_basenames_collide(tmp_path: Path):
+    entries = base_entries()
+    entries[APP + "Frameworks/Dup.framework/Dup"] = build_macho(file_type=MH_DYLIB, min_os=None)
+    entries[APP + "PlugIns/Widget.appex/Frameworks/Dup.framework/Dup"] = build_macho(
+        file_type=MH_DYLIB, min_os=None
+    )
+
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert report.dependencies.duplicate_framework_basenames == ("Dup.framework",)
+    assert "FRAMEWORK_NAME_COLLISION" in finding_codes(report)
+
+
+def test_rpath_load_command_is_captured(tmp_path: Path):
+    entries = base_entries(executable=build_macho(rpaths=("@executable_path/Frameworks",)))
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+
+    assert report.macho_slices[0].rpaths == ("@executable_path/Frameworks",)
+
+
+# --------------------------------------------------------------------------
+# Malicious / malformed archive safety
+# --------------------------------------------------------------------------
+
+
+def _expect_refusal(path: Path, code: str, limits: ArchiveLimits | None = None) -> None:
+    with pytest.raises(ArchiveSafetyError) as excinfo:
+        inspect_ipa(path, limits=limits)
+    assert excinfo.value.code == code
+
+
+def test_path_traversal_is_refused(tmp_path: Path):
+    path = write_ipa(tmp_path / "evil.ipa", {"Payload/Demo.app/Info.plist": b"x", "../escape": b"x"})
+    _expect_refusal(path, "PATH_TRAVERSAL")
+
+
+def test_absolute_entry_path_is_refused(tmp_path: Path):
+    path = write_ipa(tmp_path / "evil.ipa", {"Payload/Demo.app/Info.plist": b"x", "/etc/passwd": b"x"})
+    _expect_refusal(path, "ABSOLUTE_ENTRY_PATH")
+
+
+def test_backslash_entry_path_is_refused(tmp_path: Path):
+    # zipfile rewrites ``\`` to ``/`` on Windows, so the entry name is patched
+    # in the finished archive: the guard must hold on every host OS.
+    path = write_ipa(
+        tmp_path / "evil.ipa", {"Payload/Demo.app/Info.plist": b"x", "Payload/Demo.app/x": b"x"}
+    )
+    path.write_bytes(path.read_bytes().replace(b"Payload/Demo.app/x", b"Payload\\Demo.app\\x"))
+    _expect_refusal(path, "BACKSLASH_ENTRY_PATH")
+
+
+def test_compression_bomb_is_refused(tmp_path: Path):
+    path = write_ipa(
+        tmp_path / "bomb.ipa",
+        {"Payload/Demo.app/Info.plist": b"x", "Payload/Demo.app/bomb": b"\x00" * (4 * 1024 * 1024)},
+    )
+    _expect_refusal(
+        path,
+        "COMPRESSION_RATIO_ABNORMAL",
+        ArchiveLimits(max_compression_ratio=2.0, ratio_check_min_bytes=1024),
+    )
+
+
+def test_entry_count_limit_is_enforced(tmp_path: Path):
+    path = write_ipa(tmp_path / "many.ipa", {"a": b"1", "b": b"2", "c": b"3"})
+    _expect_refusal(path, "TOO_MANY_ENTRIES", ArchiveLimits(max_entries=2))
+
+
+def test_oversized_entry_is_refused(tmp_path: Path):
+    path = write_ipa(tmp_path / "big.ipa", {"Payload/Demo.app/Info.plist": b"x" * 4096})
+    _expect_refusal(path, "ENTRY_TOO_LARGE", ArchiveLimits(max_entry_uncompressed_bytes=1024))
+
+
+def _set_zip_flag(path: Path, bit: int = 0x01) -> Path:
+    """Set a general-purpose flag bit in every local and central header."""
+    data = bytearray(path.read_bytes())
+    for signature, offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+        index = data.find(signature)
+        while index != -1:
+            data[index + offset] |= bit
+            index = data.find(signature, index + 1)
+    path.write_bytes(bytes(data))
+    return path
+
+
+def test_encrypted_entries_are_refused(tmp_path: Path):
+    path = write_ipa(tmp_path / "enc.ipa", {"Payload/Demo.app/Info.plist": b"x"})
+    _expect_refusal(_set_zip_flag(path), "ENCRYPTED_ENTRY")
+
+
+def test_non_zip_input_is_refused(tmp_path: Path):
+    path = tmp_path / "notzip.ipa"
+    path.write_bytes(b"this is not a zip archive")
+    _expect_refusal(path, "NOT_A_ZIP")
+
+
+def test_empty_archive_is_refused(tmp_path: Path):
+    path = tmp_path / "empty.ipa"
+    with zipfile.ZipFile(path, "w"):
+        pass
+    _expect_refusal(path, "EMPTY_ARCHIVE")
+
+
+def test_archive_without_application_bundle_is_refused(tmp_path: Path):
+    path = write_ipa(tmp_path / "lib.ipa", {"Payload/Library.dylib": build_macho()})
+    with pytest.raises(BundleError):
+        inspect_ipa(path)
+
+
+def test_duplicate_entry_names_are_a_warning_not_a_failure(tmp_path: Path):
+    path = tmp_path / "dup.ipa"
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, data in base_entries().items():
+            archive.writestr(name, data)
+        archive.writestr(APP + "Assets.car", b"first")
+        archive.writestr(APP + "Assets.car", b"second")
+
+    report = inspect_ipa(path)
+    assert "DUPLICATE_ENTRY_NAME" in finding_codes(report)
+    duplicate = finding(report, "DUPLICATE_ENTRY_NAME")
+    assert duplicate.severity == "warning"
+    assert APP + "Assets.car" in duplicate.context["entries"]
+
+
+def test_read_limit_blocks_oversized_info_plist(tmp_path: Path):
+    # Incompressible payload so the compression-bomb guard cannot fire first.
+    payload = os.urandom(5 * 1024 * 1024)
+    path = write_ipa(
+        tmp_path / "fatplist.ipa",
+        {APP + "Info.plist": payload, APP + "Demo": build_macho()},
+    )
+    _expect_refusal(path, "ENTRY_READ_TOO_LARGE")
