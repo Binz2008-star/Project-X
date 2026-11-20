@@ -3,6 +3,7 @@
 @interface XinstaSettingsViewController ()
 @property (nonatomic, strong) XinstaSettingsDataSource *dataSource;
 @property (nonatomic, strong) XinstaIG456Adapter *adapter;
+@property (nonatomic, strong) UILabel *statusLabel;
 @end
 
 @implementation XinstaSettingsViewController
@@ -20,15 +21,55 @@ static NSString *const XinstaSettingsCellIdentifier = @"XinstaSettingsCell";
     return self;
 }
 
+- (instancetype)initWithStyle:(UITableViewStyle)style {
+    (void)style;
+    [NSException raise:NSInvalidArgumentException
+                format:@"Use initWithDataSource:adapter: for XinstaSettingsViewController"];
+    return nil;
+}
+
+- (instancetype)initWithCoder:(NSCoder *)coder {
+    (void)coder;
+    [NSException raise:NSInvalidArgumentException
+                format:@"Use initWithDataSource:adapter: for XinstaSettingsViewController"];
+    return nil;
+}
+
+- (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
+    (void)nibNameOrNil;
+    (void)nibBundleOrNil;
+    [NSException raise:NSInvalidArgumentException
+                format:@"Use initWithDataSource:adapter: for XinstaSettingsViewController"];
+    return nil;
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
-    UILabel *footer = [[UILabel alloc] initWithFrame:CGRectMake(0, 0, self.view.bounds.size.width, 44)];
-    footer.text = [self.dataSource statusTextForReport:self.adapter.compatibilityReport];
-    footer.textAlignment = NSTextAlignmentCenter;
-    footer.textColor = [UIColor secondaryLabelColor];
-    footer.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
-    footer.numberOfLines = 0;
+
+    UIView *footer = [[UIView alloc] initWithFrame:CGRectZero];
+    UILabel *label = [[UILabel alloc] init];
+    label.translatesAutoresizingMaskIntoConstraints = NO;
+    label.text = [self.dataSource statusTextForReport:self.adapter.compatibilityReport];
+    label.textAlignment = NSTextAlignmentCenter;
+    label.textColor = [UIColor secondaryLabelColor];
+    label.font = [UIFont systemFontOfSize:13 weight:UIFontWeightRegular];
+    label.numberOfLines = 0;
+    [footer addSubview:label];
+    [NSLayoutConstraint activateConstraints:@[
+        [label.leadingAnchor constraintEqualToAnchor:footer.leadingAnchor constant:16.0],
+        [label.trailingAnchor constraintEqualToAnchor:footer.trailingAnchor constant:-16.0],
+        [label.topAnchor constraintEqualToAnchor:footer.topAnchor constant:8.0],
+        [label.bottomAnchor constraintEqualToAnchor:footer.bottomAnchor constant:-8.0],
+    ]];
+
+    CGFloat width = CGRectGetWidth(self.tableView.frame);
+    if (width <= 0.0) {
+        width = CGRectGetWidth(self.view.bounds);
+    }
+    CGSize fitted = [label sizeThatFits:CGSizeMake(MAX(width - 32.0, 0.0), CGFLOAT_MAX)];
+    footer.frame = CGRectMake(0.0, 0.0, width, ceil(fitted.height) + 16.0);
     self.tableView.tableFooterView = footer;
+    self.statusLabel = label;
 }
 
 #pragma mark - UITableViewDataSource
@@ -45,15 +86,28 @@ static NSString *const XinstaSettingsCellIdentifier = @"XinstaSettingsCell";
         cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle
                                       reuseIdentifier:XinstaSettingsCellIdentifier];
     }
+
     XinstaFeature *feature = [self.dataSource featureAtIndex:(NSUInteger)indexPath.row];
-    cell.textLabel.text = feature.title ?: @"";
+    if (!feature) {
+        cell.textLabel.text = @"";
+        cell.detailTextLabel.text = nil;
+        cell.accessoryView = nil;
+        return cell;
+    }
+
+    cell.textLabel.text = feature.title;
     cell.detailTextLabel.text = feature.featureDescription;
-    BOOL enabled = [self.dataSource isEnabledAtIndex:(NSUInteger)indexPath.row];
-    UISwitch *toggle = [[UISwitch alloc] init];
-    toggle.on = enabled;
+
+    UISwitch *toggle;
+    if ([cell.accessoryView isKindOfClass:[UISwitch class]]) {
+        toggle = (UISwitch *)cell.accessoryView;
+    } else {
+        toggle = [[UISwitch alloc] init];
+        [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
+        cell.accessoryView = toggle;
+    }
+    toggle.on = [self.dataSource isEnabledAtIndex:(NSUInteger)indexPath.row];
     toggle.tag = (NSInteger)indexPath.row;
-    [toggle addTarget:self action:@selector(toggleChanged:) forControlEvents:UIControlEventValueChanged];
-    cell.accessoryView = toggle;
     return cell;
 }
 

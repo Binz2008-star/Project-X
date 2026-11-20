@@ -55,7 +55,18 @@ jobs:
             BUILD_VERSION_BLOCK="$(grep -A 6 'LC_BUILD_VERSION' <<<"$LOAD_COMMANDS")"
             echo "$BUILD_VERSION_BLOCK"
             grep -qE 'platform[[:space:]]+(IPHONEOS|2)([[:space:]]|$)' <<<"$BUILD_VERSION_BLOCK"
+            grep -qE 'minos[[:space:]]+16\.3([[:space:]]|$)' <<<"$BUILD_VERSION_BLOCK"
+          elif grep -q 'LC_VERSION_MIN_IPHONEOS' <<<"$LOAD_COMMANDS"; then
+            grep -qE 'version[[:space:]]+16\.3([[:space:]]|$)' <<<"$LOAD_COMMANDS"
           else
-            grep -q 'LC_VERSION_MIN_IPHONEOS' <<<"$LOAD_COMMANDS"
+            echo "artifact does not target iOS" >&2
+            exit 1
           fi
-          echo "Xinsta Core artifact verified: arm64 iOS Mach-O dylib"
+          if grep -q 'LC_CODE_SIGNATURE' <<<"$LOAD_COMMANDS"; then
+            echo "artifact must be unsigned" >&2
+            exit 1
+          fi
+          INSTALL_NAMES="$(otool -L "$ARTIFACT")"
+          echo "$INSTALL_NAMES"
+          grep -qF '@rpath/libXinstaCore.dylib' <<<"$INSTALL_NAMES"
+          echo "Xinsta Core artifact verified: unsigned arm64 iOS 16.3 Mach-O dylib"

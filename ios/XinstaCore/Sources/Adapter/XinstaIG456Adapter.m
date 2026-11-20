@@ -2,74 +2,97 @@
 
 #import <objc/runtime.h>
 
+@interface XinstaIG456Adapter ()
+@property (nonatomic, strong) XinstaHostMetadata *hostMetadata;
+@property (nonatomic, copy, nullable XinstaSymbolAvailability) symbolAvailability;
+@property (nonatomic, strong) NSLock *stateLock;
+@end
+
 @implementation XinstaIG456Adapter
+
+@synthesize compatibilityReport = _compatibilityReport;
+@synthesize compatibilityAccepted = _compatibilityAccepted;
 
 + (instancetype)sharedAdapter {
     static XinstaIG456Adapter *adapter;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
-        adapter = [[self alloc] init];
+        XinstaHostMetadata *metadata = [XinstaHostMetadata metadataWithBundle:[NSBundle mainBundle]];
+        adapter = [[self alloc] initWithHostMetadata:metadata
+                                 symbolAvailability:[self runtimeSymbolAvailability]];
     });
     return adapter;
 }
 
-- (instancetype)init {
++ (BOOL)runtimeSymbolAvailable:(NSString *)symbolName
+                targetClassName:(NSString *)className {
+    if (symbolName.length == 0 || className.length == 0) {
+        return NO;
+    }
+    Class target = objc_getClass(className.UTF8String);
+    if (!target) {
+        return NO;
+    }
+    if ([symbolName isEqualToString:className]) {
+        return YES;
+    }
+    SEL selector = sel_registerName(symbolName.UTF8String);
+    return class_getInstanceMethod(target, selector) != NULL;
+}
+
++ (XinstaSymbolAvailability)runtimeSymbolAvailability {
+    return ^BOOL(NSString *symbolName) {
+        return [XinstaIG456Adapter runtimeSymbolAvailable:symbolName
+                                          targetClassName:@"IGProfileSheetTableViewController"];
+    };
+}
+
+- (instancetype)initWithHostMetadata:(XinstaHostMetadata *)hostMetadata
+                  symbolAvailability:(XinstaSymbolAvailability)symbolAvailability {
     self = [super init];
     if (self) {
+        _hostMetadata = hostMetadata;
+        _symbolAvailability = [symbolAvailability copy];
+        _stateLock = [[NSLock alloc] init];
+        _compatibilityAccepted = NO;
         _compatibilityReport = [[XinstaCompatibilityReport alloc] initWithSupported:NO
-                                                                            reason:@"Not checked"
-                                                                   missingSymbols:@[]];
-        _installed = NO;
+                                                                         reasonCode:XinstaCompatibilityReasonNotChecked
+                                                                             reason:@"Compatibility has not been checked"
+                                                                    missingSymbols:@[]];
     }
     return self;
 }
 
-/// Runtime symbol lookup. This is the single place where Objective-C runtime
-/// presence is confirmed. It never writes to any Instagram class; it only
-/// reads metadata. A nil result for any required symbol fails the whole gate.
-static BOOL XinstaRuntimeSymbolAvailable(NSString *symbolName) {
-    if (symbolName.length == 0) {
-        return NO;
-    }
-    const char *name = symbolName.UTF8String;
-    if ([symbolName isEqualToString:@"IGProfileSheetTableViewController"]) {
-        return objc_getClass(name) != NULL;
-    }
-    Class target = objc_getClass("IGProfileSheetTableViewController");
-    if (!target) {
-        return NO;
-    }
-    SEL selector = sel_registerName(name);
-    return class_getInstanceMethod(target, selector) != NULL;
+- (XinstaCompatibilityReport *)compatibilityReport {
+    [self.stateLock lock];
+    XinstaCompatibilityReport *report = _compatibilityReport;
+    [self.stateLock unlock];
+    return report;
 }
 
-- (BOOL)installIfSupported {
-    if (_installed) {
+- (BOOL)compatibilityAccepted {
+    [self.stateLock lock];
+    BOOL accepted = _compatibilityAccepted;
+    [self.stateLock unlock];
+    return accepted;
+}
+
+- (BOOL)evaluateCompatibility {
+    [self.stateLock lock];
+    if (_compatibilityAccepted) {
+        [self.stateLock unlock];
         return YES;
     }
 
-    NSBundle *main = [NSBundle mainBundle];
-    NSString *version = [main objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"";
-    NSString *build = [main objectForInfoDictionaryKey:@"CFBundleVersion"] ?: @"";
-
-    XinstaCompatibilityReport *report = [XinstaCompatibility checkVersion:version
-                                                                    build:build
-                                                        symbolAvailability:^BOOL(NSString *symbolName) {
-                                                            return XinstaRuntimeSymbolAvailable(symbolName);
-                                                        }];
+    XinstaCompatibilityReport *report = [XinstaCompatibility checkBundleIdentifier:self.hostMetadata.bundleIdentifier
+                                                                           version:self.hostMetadata.version
+                                                                             build:self.hostMetadata.build
+                                                                 symbolAvailability:self.symbolAvailability];
     _compatibilityReport = report;
-
-    if (!report.supported) {
-        // Fail closed: leave every Instagram class untouched when the app is
-        // not exactly the analysed build or a symbol is missing at runtime.
-        return NO;
-    }
-
-    // This increment registers the adapter as installed but performs no
-    // swizzling. Method replacement requires separate review and device QA
-    // before it can be enabled; reporting `supported` is not a hook claim.
-    _installed = YES;
-    return YES;
+    _compatibilityAccepted = report.supported;
+    BOOL accepted = report.supported;
+    [self.stateLock unlock];
+    return accepted;
 }
 
 @end

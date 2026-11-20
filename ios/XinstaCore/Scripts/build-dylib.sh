@@ -11,12 +11,14 @@ mkdir -p "$OUT"
 SDK="$(xcrun --sdk iphoneos --show-sdk-path)"
 CLANG="$(xcrun --sdk iphoneos -f clang)"
 MIN_OS="16.3"
+INSTALL_NAME="@rpath/libXinstaCore.dylib"
 
 SOURCES=(
   "$ROOT/Sources/XinstaCore.m"
   "$ROOT/Sources/Core/XinstaFeature.m"
   "$ROOT/Sources/Core/XinstaFeatureRegistry.m"
   "$ROOT/Sources/Core/XinstaCompatibility.m"
+  "$ROOT/Sources/Core/XinstaHostMetadata.m"
   "$ROOT/Sources/Core/XinstaSettingsDataSource.m"
   "$ROOT/Sources/Adapter/XinstaIG456Adapter.m"
   "$ROOT/Sources/UI/XinstaSettingsViewController.m"
@@ -26,16 +28,16 @@ SOURCES=(
   -target arm64-apple-ios"$MIN_OS" \
   -isysroot "$SDK" \
   -fobjc-arc -fmodules \
-  -I "$ROOT/Sources/Core" -I "$ROOT/Sources/Adapter" -I "$ROOT/Sources/UI" \
+  -I "$ROOT/Sources" -I "$ROOT/Sources/Core" -I "$ROOT/Sources/Adapter" -I "$ROOT/Sources/UI" \
   -O2 -Wall -Wextra -Werror \
   -dynamiclib \
-  -install_name @rpath/libXinstaCore.dylib \
+  -install_name "$INSTALL_NAME" \
   -o "$OUT/libXinstaCore.dylib" \
   "${SOURCES[@]}" \
   -framework Foundation -framework UIKit
 
-# Verify the artifact is an arm64 iOS Mach-O dylib. Every check below fails
-# the build explicitly; no validation result is suppressed.
+# Verify the artifact is an unsigned arm64 iOS Mach-O dylib targeting 16.3.
+# Every check fails explicitly; no validation result is suppressed.
 ARTIFACT="$OUT/libXinstaCore.dylib"
 
 if [[ ! -f "$ARTIFACT" ]]; then
@@ -83,15 +85,36 @@ if grep -q 'LC_BUILD_VERSION' <<<"$LOAD_COMMANDS"; then
   echo "--- LC_BUILD_VERSION ---"
   echo "$BUILD_VERSION_BLOCK"
   echo "-------------------------"
-  # otool renders the platform either symbolically (IPHONEOS) or numerically
-  # (2 == PLATFORM_IOS); accept either, with flexible whitespace.
   if ! grep -qE 'platform[[:space:]]+(IPHONEOS|2)([[:space:]]|$)' <<<"$BUILD_VERSION_BLOCK"; then
     echo "ERROR: LC_BUILD_VERSION platform is not iOS" >&2
     exit 1
   fi
-elif ! grep -q 'LC_VERSION_MIN_IPHONEOS' <<<"$LOAD_COMMANDS"; then
+  if ! grep -qE 'minos[[:space:]]+16\.3([[:space:]]|$)' <<<"$BUILD_VERSION_BLOCK"; then
+    echo "ERROR: minimum OS is not 16.3" >&2
+    exit 1
+  fi
+elif grep -q 'LC_VERSION_MIN_IPHONEOS' <<<"$LOAD_COMMANDS"; then
+  if ! grep -qE 'version[[:space:]]+16\.3([[:space:]]|$)' <<<"$LOAD_COMMANDS"; then
+    echo "ERROR: minimum OS is not 16.3" >&2
+    exit 1
+  fi
+else
   echo "ERROR: artifact does not target iOS" >&2
   exit 1
 fi
 
-echo "Xinsta Core artifact validation passed"
+if grep -q 'LC_CODE_SIGNATURE' <<<"$LOAD_COMMANDS"; then
+  echo "ERROR: artifact must be unsigned but contains LC_CODE_SIGNATURE" >&2
+  exit 1
+fi
+
+INSTALL_NAMES="$(otool -L "$ARTIFACT")"
+echo "--- LC_ID_DYLIB / dependencies ---"
+echo "$INSTALL_NAMES"
+echo "----------------------------------"
+if ! grep -qF "$INSTALL_NAME" <<<"$INSTALL_NAMES"; then
+  echo "ERROR: expected install name $INSTALL_NAME is missing" >&2
+  exit 1
+fi
+
+echo "Xinsta Core artifact validation passed: unsigned arm64 iOS 16.3 dylib"

@@ -15,10 +15,10 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, copy, readonly) NSArray<XinstaFeature *> *features;
 
 - (NSUInteger)numberOfRows;
-- (XinstaFeature *)featureAtIndex:(NSUInteger)index;
+- (nullable XinstaFeature *)featureAtIndex:(NSUInteger)index;
 - (BOOL)isEnabledAtIndex:(NSUInteger)index;
 - (void)setEnabled:(BOOL)enabled atIndex:(NSUInteger)index;
-- (NSString *)statusTextForReport:(XinstaCompatibilityReport *)report;
+- (NSString *)statusTextForReport:(nullable XinstaCompatibilityReport *)report;
 
 @end
 

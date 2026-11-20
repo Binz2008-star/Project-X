@@ -41,15 +41,47 @@ static NSString *const XinstaFeatureOverrideKey = @"xinsta.core.featureOverrides
     return self;
 }
 
-- (NSDictionary<NSString *, NSNumber *> *)effectiveStates {
-    NSDictionary *overrides = [self.userDefaults dictionaryForKey:XinstaFeatureOverrideKey] ?: @{};
-    NSMutableDictionary *states = [NSMutableDictionary dictionary];
-    for (XinstaFeature *feature in self.features) {
-        NSNumber *override = overrides[feature.identifier];
-        BOOL enabled = override ? override.boolValue : feature.isEnabledByDefault;
-        states[feature.identifier] = @(enabled);
+- (BOOL)isKnownIdentifier:(NSString *)identifier {
+    if (identifier.length == 0) {
+        return NO;
     }
-    return [states copy];
+    for (XinstaFeature *feature in self.features) {
+        if ([feature.identifier isEqualToString:identifier]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+/// Returns only well-typed values for currently registered identifiers.
+/// Malformed defaults and stale keys are ignored, never propagated.
+- (NSDictionary<NSString *, NSNumber *> *)validatedOverrides {
+    id stored = [self.userDefaults objectForKey:XinstaFeatureOverrideKey];
+    if (![stored isKindOfClass:[NSDictionary class]]) {
+        return @{};
+    }
+    NSDictionary *candidates = (NSDictionary *)stored;
+    NSMutableDictionary *valid = [NSMutableDictionary dictionary];
+    for (XinstaFeature *feature in self.features) {
+        id value = candidates[feature.identifier];
+        if ([value isKindOfClass:[NSNumber class]]) {
+            valid[feature.identifier] = (NSNumber *)value;
+        }
+    }
+    return [valid copy];
+}
+
+- (NSDictionary<NSString *, NSNumber *> *)effectiveStates {
+    @synchronized (self) {
+        NSDictionary<NSString *, NSNumber *> *overrides = [self validatedOverrides];
+        NSMutableDictionary *states = [NSMutableDictionary dictionary];
+        for (XinstaFeature *feature in self.features) {
+            NSNumber *override = overrides[feature.identifier];
+            BOOL enabled = override ? override.boolValue : feature.isEnabledByDefault;
+            states[feature.identifier] = @(enabled);
+        }
+        return [states copy];
+    }
 }
 
 - (BOOL)isEnabledForIdentifier:(NSString *)identifier {
@@ -57,9 +89,14 @@ static NSString *const XinstaFeatureOverrideKey = @"xinsta.core.featureOverrides
 }
 
 - (void)setEnabled:(BOOL)enabled forIdentifier:(NSString *)identifier {
-    NSMutableDictionary *overrides = [[self.userDefaults dictionaryForKey:XinstaFeatureOverrideKey] mutableCopy] ?: [NSMutableDictionary dictionary];
-    overrides[identifier] = @(enabled);
-    [self.userDefaults setObject:[overrides copy] forKey:XinstaFeatureOverrideKey];
+    @synchronized (self) {
+        if (![self isKnownIdentifier:identifier]) {
+            return;
+        }
+        NSMutableDictionary *overrides = [[self validatedOverrides] mutableCopy];
+        overrides[identifier] = @(enabled);
+        [self.userDefaults setObject:[overrides copy] forKey:XinstaFeatureOverrideKey];
+    }
 }
 
 @end
