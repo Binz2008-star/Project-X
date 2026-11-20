@@ -2,6 +2,11 @@
 
 Independent technology project for **authorized** iOS app enhancements, feature licensing, build infrastructure, and eventual distribution. The first goal is one legally viable, supportable product, not a consumer storefront.
 
+## Develop with OpenCode on Windows
+
+- [OpenCode project instructions](AGENTS.md) — loaded automatically when OpenCode opens this repository.
+- [Windows PC setup and GitHub sync instructions](docs/OPENCODE_WINDOWS_SETUP.md) — clone, switch to the current development branch, test locally, and submit changes safely.
+
 ## Current handoffs (20 November 2026)
 
 - [Project handoff — scope, verified status, PR chain and next decisions](docs/PROJECT_HANDOFF.md)
