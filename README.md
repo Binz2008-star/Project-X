@@ -34,3 +34,11 @@ Implemented under `project_x/server/` using FastAPI, SQLAlchemy and Alembic.
 
 No storefront, payment gateway, third-party IPA, commercial tweak source or signing keys.
 This is an engineered prototype and **must not be exposed as a live commercial API until the pending security gates are closed**.
+
+## Neon staging (isolated; not an API deployment)
+
+- [Verified Neon staging database and guarded test procedure](docs/NEON_STAGING.md)
+- Read-only schema preflight: `python -m scripts.check_neon_staging`
+- Guarded staging API tests (requires staging-only secret URL): `python -m scripts.run_neon_staging_tests`
+
+Staging connection credentials are **never** committed; staging and production are isolated Neon branches.
