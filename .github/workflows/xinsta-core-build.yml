@@ -44,7 +44,7 @@ jobs:
           cd ios/XinstaCore
           xcodebuild -list
           xcodebuild test \
-            -scheme XinstaCore-Package \
+            -scheme XinstaCore \
             -sdk iphonesimulator \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -derivedDataPath "$RUNNER_TEMP/XinstaCoreDerivedData" \
