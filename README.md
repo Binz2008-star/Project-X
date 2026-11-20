@@ -2,6 +2,11 @@
 
 Independent technology project for **authorized** iOS app enhancements, feature licensing, build infrastructure, and eventual distribution. The first goal is one legally viable, supportable product, not a consumer storefront.
 
+## Current handoffs (20 November 2026)
+
+- [Project handoff — scope, verified status, PR chain and next decisions](docs/PROJECT_HANDOFF.md)
+- [Engineering / operations handoff — architecture, Neon inventory, tests and safe next steps](docs/ENGINEERING_HANDOFF.md)
+
 ## Current implementation (phase 1, preserved)
 
 - [Original local licensing prototype](project_x/licensing.py): one-use activation codes, 7-day trials, monthly/quarterly entitlements independent of app-signing validity.
