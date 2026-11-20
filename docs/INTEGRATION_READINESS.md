@@ -1,6 +1,7 @@
 # Analyzer-to-Build-Manager integration readiness
 
-Status: **implemented and locally verified; Draft PR stack only. No merge, deployment,
+Status: **implemented, locally verified and CI-verified at code head
+`90eba28fd1d5c7551bf51563c2c3c4c632fcc282`; Draft PR stack only. No merge, deployment,
 signing, repackaging, injection, Neon change, or device action is included.**
 
 This stacked increment converges the read-only IPA analyzer from Draft PR #7 with the
@@ -62,7 +63,14 @@ Local, Python 3.14.7, repository virtual environment (2026-11-21):
 - `python -m scripts.export_openapi --check` → **OpenAPI schema matches implementation**.
 - `git diff --check` → clean.
 
-CI evidence will be recorded here after the first push and PR-level runs.
+CI at code head `90eba28fd1d5c7551bf51563c2c3c4c632fcc282`:
+
+| Run | Event | Result | Evidence |
+| --- | --- | --- | --- |
+| [`44837719444`](https://github.com/Binz2008-star/Project-X/actions/runs/44837719444) | push | SUCCESS | `58 passed` API, `2 passed` staging guard, `51 passed` preflight, `7 passed` integration, `Ran 7 tests` licensing, both Alembic checks clean, OpenAPI in sync |
+| [`44837730218`](https://github.com/Binz2008-star/Project-X/actions/runs/44837730218) | pull_request | SUCCESS | Same counts on the same head |
+
+CI uses Python 3.12; local verification used Python 3.14.7. The `--basetemp` override is only needed on Windows because the default pytest temp root can be ACL-restricted.
 
 ## Security and compatibility considerations
 
