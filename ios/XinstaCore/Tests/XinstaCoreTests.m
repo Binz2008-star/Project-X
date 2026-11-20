@@ -104,11 +104,11 @@ static void TestPersistenceHardening(void) {
                                                                    title:@"Duplicate"
                                                              description:@"Duplicate"
                                                         enabledByDefault:NO];
-    NSArray *withDuplicate = @[[[XinstaFeature alloc] initWithIdentifier:@"info"
+    XinstaFeature *primary = [[XinstaFeature alloc] initWithIdentifier:@"info"
                                                                  title:@"Info"
                                                            description:@"Info"
-                                                      enabledByDefault:YES]],
-                               duplicate];
+                                                      enabledByDefault:YES];
+    NSArray *withDuplicate = @[primary, duplicate];
     NSUserDefaults *duplicateDefaults = CleanDefaults();
     XinstaFeatureRegistry *duplicateRegistry = [[XinstaFeatureRegistry alloc] initWithFeatures:withDuplicate
                                                                                   userDefaults:duplicateDefaults];
