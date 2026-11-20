@@ -12,14 +12,6 @@ let package = Package(
             targets: ["XinstaCore", "XinstaAdapter", "XinstaUI"]
         )
     ],
-    // These files are consumed by the script-based macOS build/tests, not by
-    // the SwiftPM simulator test package.
-    exclude: [
-        "Sources/XinstaCore.m",
-        "Sources/XinstaCore.h",
-        "Tests/XinstaCoreTests.m",
-        "Scripts"
-    ],
     targets: [
         .target(
             name: "XinstaCore",
