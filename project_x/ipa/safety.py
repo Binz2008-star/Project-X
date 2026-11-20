@@ -140,13 +140,17 @@ def _raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
         ) = struct.unpack_from("<4s4H2LH", tail, eocd)
         boundary = tail_start + eocd
 
-        if (
+        locator = tail.rfind(_ZIP64_LOCATOR_SIG, 0, eocd)
+        has_zip64_locator = locator >= 0 and locator + 20 == eocd
+        has_zip64_markers = (
             count >= _ZIP64_COUNT_MARKER
             or cd_offset >= _ZIP64_MARKER
             or cd_size >= _ZIP64_MARKER
-        ):
-            locator = tail.rfind(_ZIP64_LOCATOR_SIG, 0, eocd)
-            if locator < 0 or locator + 20 != eocd:
+        )
+        # Python's zipfile honours an adjacent locator even when the classic
+        # fields are not set to 0xFFFF/0xFFFFFFFF, so the raw scan must too.
+        if has_zip64_locator or has_zip64_markers:
+            if not has_zip64_locator:
                 raise ArchiveSafetyError(
                     "MALFORMED_CENTRAL_DIRECTORY",
                     "ZIP64 locator is not immediately before the end of central directory",

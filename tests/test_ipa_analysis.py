@@ -527,7 +527,7 @@ def test_read_limit_blocks_oversized_info_plist(tmp_path: Path):
 # --------------------------------------------------------------------------
 
 
-def _make_zip64(path: Path, entries: dict[str, bytes]) -> Path:
+def _make_zip64(path: Path, entries: dict[str, bytes], use_markers: bool = True) -> Path:
     """Convert a normal ZIP into a ZIP64 archive without writing 4 GiB."""
     plain = write_ipa(path.with_name(path.stem + ".plain.ipa"), entries)
     data = plain.read_bytes()
@@ -552,17 +552,22 @@ def _make_zip64(path: Path, entries: dict[str, bytes]) -> Path:
         cd_offset,
     )
     locator = struct.pack("<4sLQL", b"PK\x06\x07", 0, eocd, 1)
-    markers = struct.pack(
-        "<4s4H2LH",
-        b"PK\x05\x06",
-        0,
-        0,
-        0xFFFF,
-        0xFFFF,
-        0xFFFFFFFF,
-        0xFFFFFFFF,
-        0,
-    )
+    if use_markers:
+        markers = struct.pack(
+            "<4s4H2LH",
+            b"PK\x05\x06",
+            0,
+            0,
+            0xFFFF,
+            0xFFFF,
+            0xFFFFFFFF,
+            0xFFFFFFFF,
+            0,
+        )
+    else:
+        # An adjacent locator is sufficient for zipfile; the classic fields
+        # can still contain small (even wrong) values.
+        markers = struct.pack("<4s4H2LH", b"PK\x05\x06", 0, 0, 0, 0, 0, 0, 0)
     path.write_bytes(data[:eocd] + zip64_eocd + locator + markers)
     plain.unlink()
     return path
@@ -575,6 +580,15 @@ def test_zip64_archive_is_inspected(tmp_path: Path):
     assert report.identity.bundle_id == "com.example.demo"
     assert report.artifact.entry_count == 3
     assert [s.arch for s in report.macho_slices] == ["arm64"]
+
+
+def test_zip64_locator_is_honoured_without_classic_markers(tmp_path: Path):
+    path = _make_zip64(tmp_path / "Zip64NoMarkers.ipa", base_entries(), use_markers=False)
+    report = inspect_ipa(path)
+
+    assert report.identity.bundle_id == "com.example.demo"
+    assert report.artifact.entry_count == 3
+    assert APP + "Info.plist" in raw_central_names(str(path), 1000)
 
 
 def test_fake_eocd_signature_in_comment_is_ignored(tmp_path: Path):
