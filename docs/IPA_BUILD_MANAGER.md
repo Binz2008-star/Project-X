@@ -91,7 +91,8 @@ Exit codes: `0` preflight passed, `2` preflight rejected, `1` unreadable input, 
 - Local after the review fixes: `51 passed` for `tests/test_build_manager_preflight.py` on Python 3.14.7 (2026-11-21). Earlier full local suite before those fixes: `71 passed, 29 skipped` combined; legacy licensing `OK (7 tests)`; `OpenAPI schema matches implementation`; `git diff --check` clean.
 - CI on code head `d600c2039aadc7e56194ea4618f8c74d0cfca029`: push run `44835102952` **SUCCESS** and PR run `44835108953` **SUCCESS** — `41 passed` preflight, `58 passed` API, `2 passed` staging guard, `Ran 7 tests` licensing, both Alembic checks clean, OpenAPI in sync.
 - CI on documentation-only head `f5787c975e2516f0f975b720e16be1a9fdc4f4cd`: push run `44835319318` **SUCCESS** and PR run `44835326639` **SUCCESS** with the same counts.
-- The review-fix commit changes code and must be verified by fresh runs; record those IDs here before requesting final re-review. Earlier commit `fe31227` runs `44834952866` / `44834992322` are superseded.
+- CI on review-fix code head `d9db3445c6ec5029456849e7ba0501ffcf2f7613`: push run `44836339224` **SUCCESS** and PR run `44836348720` **SUCCESS** — `51 passed` preflight, `58 passed` API, `2 passed` staging guard, `Ran 7 tests` licensing, both Alembic checks clean, OpenAPI in sync. Any later documentation-only commit does not change this code evidence.
+- Earlier commits `fe31227`, `d600c20`, and `f5787c9` have green runs but are superseded.
 
 ## Independent review closure (first pass)
 
