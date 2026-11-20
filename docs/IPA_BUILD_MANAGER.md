@@ -104,7 +104,9 @@ The first independent review returned `REQUEST CHANGES` with two Medium findings
 | CLI argument parsing bypassed the documented exit code and echoed paths | FIXED | `SafeArgumentParser.error()` raises `InvalidArguments`; CLI returns 1 with a generic JSON error for unknown/missing arguments | New CLI tests for extra and missing arguments containing private paths |
 | Verification section referenced a stale head | FIXED | This section now distinguishes code head from documentation-only head and requires fresh IDs for the review-fix commit | This document |
 
-No merge or deployment is implied by this closure; independent re-review is still required.
+Independent re-review at code head `d9db3445c6ec5029456849e7ba0501ffcf2f7613` returned **APPROVE** with no Critical, High, Medium, or Low findings. The reviewer confirmed the three fixes, verified that the new tests fail against the pre-fix code, checked all 46 analyzer finding codes against the allowlist, and verified CI runs `44836339224`, `44836348720`, `44836590901`, and `44836598327` from actual logs. The docs-only head `a0d4585cebf67d4243cb5bb6b54d6c781d092b19` does not change that code evidence.
+
+No merge or deployment is implied by this approval. PR #9 remains DRAFT pending explicit owner authorization.
 
 ## Security and compatibility considerations
 
@@ -115,7 +117,7 @@ No merge or deployment is implied by this closure; independent re-review is stil
 
 ## Outstanding risks and next milestone
 
-1. Independent re-review after the review-fix commit and fresh CI (pending). The first pass returned `REQUEST CHANGES`; all three findings are addressed above.
+1. Independent review is complete: first pass `REQUEST CHANGES`, re-review **APPROVE** with no remaining findings. Owner authorization is still required for any merge or later integration stage.
 2. The analyzer that emits the report lives in the separate Draft PR #7 and is not imported here; integration is by the pinned `schema_version = "1.0"` contract and synthetic payloads only. An end-to-end test with real analyzer output is pending until the branches converge.
 3. An owner-owned, buildable iOS test application must exist before any real integration rehearsal. The fictional `demo.owned` identity is only a contract fixture.
 4. Signing identity, provisioning profile, registered UDID, and written device-authorization scope remain unavailable — all plan steps that need them stay `blocked`.
