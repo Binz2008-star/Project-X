@@ -1,0 +1,112 @@
+name: Xinsta Core (macOS build + tests)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ios/XinstaCore/**'
+      - 'docs/XINSTA_CORE.md'
+      - '.github/workflows/xinsta-core-build.yml'
+  push:
+    branches:
+      - 'feature/xinsta-core'
+    paths:
+      - 'ios/XinstaCore/**'
+      - 'docs/XINSTA_CORE.md'
+      - '.github/workflows/xinsta-core-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Unsigned dylib compile + Core tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk macosx --show-sdk-version
+
+      - name: Compile unsigned iOS dylib
+        run: bash ios/XinstaCore/Scripts/build-dylib.sh
+
+      - name: Run Foundation-only Core tests
+        run: bash ios/XinstaCore/Scripts/run-tests.sh
+
+      - name: Run iOS Simulator UIKit XCTests
+        run: |
+          set -euo pipefail
+          cd ios/XinstaCore
+          xcodebuild -list
+
+          SIM_NAME="XinstaUIKitTestsSimulator"
+          if xcrun simctl list devices | grep -q "$SIM_NAME"; then
+            xcrun simctl delete "$SIM_NAME"
+          fi
+
+          RUNTIME_ID="$(xcrun simctl list runtimes available \
+            | sed -n 's/.*\(com.apple.CoreSimulator.SimRuntime.iOS-[^)]*\).*/\1/p' \
+            | tail -n 1)"
+          DEVICE_TYPE_ID="$(xcrun simctl list devicetypes \
+            | sed -n 's/.*\(com.apple.CoreSimulator.SimDeviceType.iPhone-16\).*/\1/p' \
+            | head -n 1)"
+          if [[ -z "$DEVICE_TYPE_ID" ]]; then
+            DEVICE_TYPE_ID="$(xcrun simctl list devicetypes \
+              | sed -n 's/.*\(com.apple.CoreSimulator.SimDeviceType.iPhone-[^)]*\).*/\1/p' \
+              | tail -n 1)"
+          fi
+
+          echo "Simulator runtime: $RUNTIME_ID"
+          echo "Simulator device type: $DEVICE_TYPE_ID"
+          xcrun simctl create "$SIM_NAME" "$DEVICE_TYPE_ID" "$RUNTIME_ID"
+          xcrun simctl boot "$SIM_NAME"
+          xcrun simctl bootstatus "$SIM_NAME" -b
+
+          xcodebuild test \
+            -scheme XinstaCore \
+            -sdk iphonesimulator \
+            -destination "platform=iOS Simulator,name=$SIM_NAME" \
+            -derivedDataPath "$RUNNER_TEMP/XinstaCoreDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+      - name: Verify artifact is an arm64 iOS Mach-O dylib
+        run: |
+          set -euo pipefail
+          ARTIFACT="ios/XinstaCore/build/libXinstaCore.dylib"
+          test -f "$ARTIFACT"
+          test -s "$ARTIFACT"
+          file "$ARTIFACT"
+          MACHO_HEADER="$(otool -hv "$ARTIFACT")"
+          echo "$MACHO_HEADER"
+          grep -q 'MH_MAGIC_64' <<<"$MACHO_HEADER"
+          grep -q 'ARM64' <<<"$MACHO_HEADER"
+          grep -q 'DYLIB' <<<"$MACHO_HEADER"
+          LOAD_COMMANDS="$(otool -l "$ARTIFACT")"
+          if grep -q 'LC_BUILD_VERSION' <<<"$LOAD_COMMANDS"; then
+            BUILD_VERSION_BLOCK="$(grep -A 6 'LC_BUILD_VERSION' <<<"$LOAD_COMMANDS")"
+            echo "$BUILD_VERSION_BLOCK"
+            grep -qE 'platform[[:space:]]+(IPHONEOS|2)([[:space:]]|$)' <<<"$BUILD_VERSION_BLOCK"
+            grep -qE 'minos[[:space:]]+16\.3([[:space:]]|$)' <<<"$BUILD_VERSION_BLOCK"
+          elif grep -q 'LC_VERSION_MIN_IPHONEOS' <<<"$LOAD_COMMANDS"; then
+            grep -qE 'version[[:space:]]+16\.3([[:space:]]|$)' <<<"$LOAD_COMMANDS"
+          else
+            echo "artifact does not target iOS" >&2
+            exit 1
+          fi
+          if grep -q 'LC_CODE_SIGNATURE' <<<"$LOAD_COMMANDS"; then
+            echo "artifact must be unsigned" >&2
+            exit 1
+          fi
+          INSTALL_NAMES="$(otool -L "$ARTIFACT")"
+          echo "$INSTALL_NAMES"
+          grep -qF '@rpath/libXinstaCore.dylib' <<<"$INSTALL_NAMES"
+          echo "Xinsta Core artifact verified: unsigned arm64 iOS 16.3 Mach-O dylib"
