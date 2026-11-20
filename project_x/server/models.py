@@ -67,6 +67,7 @@ class ActivationCode(Base):
     redeemed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     redeemed_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
     redeemed_license_id: Mapped[str | None] = mapped_column(ForeignKey("licenses.id", ondelete="RESTRICT"))
+    redemption_operation: Mapped[str | None] = mapped_column(String(20))
     __table_args__ = (
         Index("ix_activation_codes_product_status", "product_id", "status"),
         CheckConstraint("status IN ('issued','redeemed','void')", name="code_status_ck"),

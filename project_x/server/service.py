@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from .config import Settings
@@ -70,21 +70,45 @@ class LicenseService:
             raise DomainError("License not found", 404)
         return obj
 
-    def _claim_code(self, code: str, product_id: str, user_id: str) -> ActivationCode:
-        # Atomic compare-and-set under a single database transaction; the code
-        # update AND license mutation roll back together on any later failure.
+    def _claim_code(self, code: str, product_id: str, user_id: str,
+                    operation: str, license_id: str | None = None) -> tuple[ActivationCode, bool]:
+        """Claim atomically or return the same account's completed same-operation retry.
+
+        A retry never grants time twice and never appends a second redemption
+        event. Codes cannot be replayed across users or operations. The existing
+        unique code hash and conditional update protect concurrent claimants.
+        """
         code_hash = fingerprint(self.settings.code_pepper, code)
-        row = self.db.execute(
+        claimed_id = self.db.execute(
             update(ActivationCode)
             .where(ActivationCode.code_hash == code_hash,
                    ActivationCode.product_id == product_id,
                    ActivationCode.status == "issued")
-            .values(status="redeemed", redeemed_at=self.now, redeemed_by=user_id)
+            .values(status="redeemed", redeemed_at=self.now, redeemed_by=user_id,
+                    redemption_operation=operation)
             .returning(ActivationCode.id)
         ).scalar_one_or_none()
-        if not row:
+        if claimed_id:
+            return self.db.get(ActivationCode, claimed_id), False
+        previous = self.db.scalar(select(ActivationCode).where(ActivationCode.code_hash == code_hash))
+        if (previous is None or previous.status != "redeemed" or
+                previous.product_id != product_id or previous.redeemed_by != user_id or
+                previous.redemption_operation != operation or
+                not previous.redeemed_license_id or
+                (license_id is not None and previous.redeemed_license_id != license_id)):
             raise DomainError("Invalid or already redeemed activation code")
-        return self.db.get(ActivationCode, row)
+        original_license = self.db.get(License, previous.redeemed_license_id)
+        if (original_license is None or original_license.user_id != user_id or
+                original_license.product_id != product_id or original_license.status == "revoked"):
+            raise DomainError("Invalid or already redeemed activation code")
+        return previous, True
+
+    def _redemption_event(self, license: License, claimed: ActivationCode,
+                          user_id: str, operation: str) -> None:
+        event(self.db, "code_redeemed", "customer", user_id, license=license,
+              now=self.now, details={"code_id": claimed.id,
+                                     "duration_days": claimed.duration_days,
+                                     "operation": operation})
 
     def _extend(self, obj: License, days: int) -> None:
         baseline = max(self.now, aware(obj.expires_at)) if obj.status == "active" else self.now
@@ -97,9 +121,15 @@ class LicenseService:
         self._product(product_id)
         existing = self.db.scalar(select(License).where(
             License.user_id == user_id, License.product_id == product_id).with_for_update())
-        if existing is not None and (existing.status == "revoked" or existing.source != "trial"):
-            raise DomainError("Existing license must be renewed; revoked licenses cannot be reused")
-        claimed = self._claim_code(code, product_id, user_id)
+        if existing is not None and existing.status == "revoked":
+            raise DomainError("Revoked licenses cannot be reused")
+        claimed, repeated = self._claim_code(code, product_id, user_id, "activation")
+        if repeated:
+            # Another concurrent transaction may have committed after our
+            # initial license lookup. Fetch by the persisted redemption link.
+            return self.db.get(License, claimed.redeemed_license_id)
+        if existing is not None and existing.source != "trial":
+            raise DomainError("Existing license must be renewed")
         if existing is None:
             obj = License(user_id=user_id, product_id=product_id,
                           activated_at=self.now, expires_at=self.now + timedelta(days=claimed.duration_days),
@@ -111,6 +141,7 @@ class LicenseService:
             self._extend(obj, claimed.duration_days)
             self.db.flush()
         claimed.redeemed_license_id = obj.id
+        self._redemption_event(obj, claimed, user_id, "activation")
         event(self.db, "activation", "customer", user_id, license=obj, now=self.now,
               details={"duration_days": claimed.duration_days, "code_id": claimed.id})
         return obj
@@ -121,9 +152,19 @@ class LicenseService:
         if obj.status == "revoked":
             raise DomainError("Revoked license cannot be renewed")
         self._product(obj.product_id)
-        claimed = self._claim_code(code, obj.product_id, user_id)
+        # Lock the license row before calculating the extended expiry: two
+        # independent renewal codes must not overwrite each other's extensions.
+        obj = self.db.scalar(select(License).where(License.id == license_id)
+                             .with_for_update().execution_options(populate_existing=True))
+        if obj.status == "revoked":
+            raise DomainError("Revoked license cannot be renewed")
+        claimed, repeated = self._claim_code(code, obj.product_id, user_id,
+                                             "renewal", license_id=license_id)
+        if repeated:
+            return obj
         self._extend(obj, claimed.duration_days)
         claimed.redeemed_license_id = obj.id
+        self._redemption_event(obj, claimed, user_id, "renewal")
         event(self.db, "renewal", "customer", user_id, license=obj, now=self.now,
               details={"duration_days": claimed.duration_days, "code_id": claimed.id})
         return obj
@@ -171,6 +212,8 @@ class LicenseService:
         }
 
     def revoke(self, obj: License, actor_role: str, actor_id: str) -> License:
+        obj = self.db.scalar(select(License).where(License.id == obj.id)
+                             .with_for_update().execution_options(populate_existing=True))
         if obj.status == "revoked":
             return obj
         obj.status = "revoked"
@@ -180,11 +223,14 @@ class LicenseService:
     def register_device(self, user_id: str, product_id: str) -> Device:
         self._customer(user_id)
         self._product(product_id)
-        # Does NOT establish trusted device identity. No client installation ID.
-        existing = self.db.scalars(select(Device).where(
+        # PostgreSQL locks the account row, serializing device registrations
+        # even when no device rows exist yet. SQLite callers acquire a write
+        # reservation (BEGIN IMMEDIATE) before reading the count.
+        self.db.execute(select(User.id).where(User.id == user_id).with_for_update()).scalar_one()
+        count = self.db.scalar(select(func.count(Device.id)).where(
             Device.user_id == user_id, Device.product_id == product_id,
-            Device.status != "revoked")).all()
-        if len(existing) >= 5:
+            Device.status != "revoked"))
+        if count >= self.settings.max_devices_per_product:
             raise DomainError("Device registration limit reached")
         device = Device(user_id=user_id, product_id=product_id,
                         registered_at=self.now, status="unverified")
@@ -211,6 +257,8 @@ class LicenseService:
         return issued
 
     def admin_extend(self, obj: License, days: int, actor_id: str):
+        obj = self.db.scalar(select(License).where(License.id == obj.id)
+                             .with_for_update().execution_options(populate_existing=True))
         if obj.status == "revoked":
             raise DomainError("Revoked license cannot be extended")
         self._extend(obj, days)

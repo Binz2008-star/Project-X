@@ -119,8 +119,13 @@ def test_initial_activation_and_features(ctx):
 def test_duplicate_redemption(ctx):
     _, auth = setup(ctx)
     code = issue(ctx)[0]
-    assert activation(ctx, auth, code).status_code == 200
-    assert activation(ctx, auth, code).status_code == 409
+    first = activation(ctx, auth, code)
+    retry = activation(ctx, auth, code)
+    assert first.status_code == retry.status_code == 200
+    assert first.json() == retry.json()  # automatic idempotent replay
+    with Session(ctx["app"].state.engine) as db:
+        assert len(db.scalars(select(LicenseEvent).where(LicenseEvent.event_type == "activation")).all()) == 1
+        assert len(db.scalars(select(LicenseEvent).where(LicenseEvent.event_type == "code_redeemed")).all()) == 1
 
 
 def test_expiry_and_renewal(ctx):
@@ -272,7 +277,9 @@ def test_parallel_activation_single_winner(ctx):
                 json={"product_id": P_ID, "activation_code": code}).status_code
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(call, range(2)))
-    assert sorted(results) == [200, 409]
+    assert sorted(results) == [200, 200]
+    with Session(ctx["app"].state.engine) as db:
+        assert len(db.scalars(select(LicenseEvent).where(LicenseEvent.event_type == "activation")).all()) == 1
 
 
 def test_admin_approval_revocation_disables_features(ctx):
@@ -340,3 +347,132 @@ def test_input_validation_prevents_unknown_fields(ctx):
     r = ctx["client"].post("/api/v1/admin/codes/batch", headers=ctx["admin"], json={
         "product_id": P_ID, "duration_days": 29, "count": 1})
     assert r.status_code == 422
+
+
+def test_activation_retry_cross_account_fails(ctx):
+    _, auth = setup(ctx)
+    code = issue(ctx)[0]
+    first = activation(ctx, auth, code)
+    assert first.status_code == 200
+    customer_id = ctx["client"].post("/api/v1/admin/users", headers=ctx["admin"],
+        json={"account_identifier": "another@example.invalid"}).json()["user_id"]
+    second_token = ctx["client"].post("/api/v1/admin/tokens", headers=ctx["admin"],
+        json={"user_id": customer_id}).json()["token"]
+    other = {"Authorization": f"Bearer {second_token}"}
+    assert activation(ctx, other, code).status_code == 409
+
+
+def test_renewal_retry_does_not_extend_twice(ctx):
+    _, auth = setup(ctx)
+    lic = activation(ctx, auth, issue(ctx)[0]).json()
+    code = issue(ctx, 90)[0]
+    url = "/api/v1/licenses/renew"
+    payload = {"license_id": lic["license_id"], "activation_code": code}
+    first = ctx["client"].post(url, headers=auth, json=payload)
+    retry = ctx["client"].post(url, headers=auth, json=payload)
+    assert first.status_code == retry.status_code == 200
+    assert first.json() == retry.json()
+    assert first.json()["expires_at"] == "2027-03-20T10:00:00+00:00"
+    with Session(ctx["app"].state.engine) as db:
+        assert len(db.scalars(select(LicenseEvent).where(LicenseEvent.event_type == "renewal")).all()) == 1
+        assert len(db.scalars(select(LicenseEvent).where(LicenseEvent.event_type == "code_redeemed")).all()) == 2
+
+
+def test_code_not_replayable_in_other_operation(ctx):
+    _, auth = setup(ctx)
+    code = issue(ctx)[0]
+    lic = activation(ctx, auth, code).json()
+    renew = ctx["client"].post("/api/v1/licenses/renew", headers=auth,
+        json={"license_id": lic["license_id"], "activation_code": code})
+    assert renew.status_code == 409
+
+
+def test_code_retry_after_revocation_rejected(ctx):
+    _, auth = setup(ctx)
+    code = issue(ctx)[0]
+    lic = activation(ctx, auth, code).json()
+    assert ctx["client"].post("/api/v1/licenses/revoke", headers=auth,
+       json={"license_id": lic["license_id"]}).status_code == 200
+    assert activation(ctx, auth, code).status_code == 409
+
+
+def test_device_limit_and_revoked_replacement(ctx):
+    _, auth = setup(ctx)
+    device_ids = []
+    for _ in range(5):
+        r = ctx["client"].post("/api/v1/devices/register", headers=auth, json={"product_id": P_ID})
+        assert r.status_code == 200, r.text
+        device_ids.append(r.json()["device_id"])
+    assert ctx["client"].post("/api/v1/devices/register", headers=auth,
+        json={"product_id": P_ID}).status_code == 409
+    revoke = ctx["client"].post(f"/api/v1/admin/devices/{device_ids[0]}/revoke", headers=ctx["admin"])
+    assert revoke.status_code == 200
+    assert ctx["client"].post("/api/v1/devices/register", headers=auth,
+        json={"product_id": P_ID}).status_code == 200
+
+
+def test_concurrent_device_limit(ctx):
+    _, auth = setup(ctx)
+    for _ in range(4):
+        assert ctx["client"].post("/api/v1/devices/register", headers=auth,
+            json={"product_id": P_ID}).status_code == 200
+    def register(_):
+        with TestClient(ctx["app"]) as client:
+            return client.post("/api/v1/devices/register", headers=auth,
+                json={"product_id": P_ID}).status_code
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        codes = sorted(executor.map(register, range(2)))
+    assert codes == [200, 409]
+
+
+def test_admin_does_not_leak_code_hash_in_event(ctx):
+    _, auth = setup(ctx)
+    code = issue(ctx)[0]
+    assert activation(ctx, auth, code).status_code == 200
+    events = ctx["client"].get("/api/v1/admin/events", headers=ctx["admin"])
+    assert events.status_code == 200
+    assert any(e["event_type"] == "code_redeemed" for e in events.json())
+    assert code not in events.text
+    with Session(ctx["app"].state.engine) as db:
+        record = db.scalar(select(ActivationCode).where(ActivationCode.product_id == P_ID))
+        assert record.redemption_operation == "activation"
+        assert record.code_hash not in events.text
+
+
+def test_concurrent_renewal_retry_is_exactly_once(ctx):
+    _, auth = setup(ctx)
+    first = activation(ctx, auth, issue(ctx)[0]).json()
+    code = issue(ctx)[0]
+    payload = {"license_id": first["license_id"], "activation_code": code}
+
+    def renew_once(_):
+        with TestClient(ctx["app"]) as client:
+            return client.post("/api/v1/licenses/renew", headers=auth, json=payload)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(renew_once, range(2)))
+    assert [r.status_code for r in responses] == [200, 200], [r.text for r in responses]
+    assert responses[0].json() == responses[1].json()
+    assert responses[0].json()["expires_at"] == "2027-01-19T10:00:00+00:00"
+    with Session(ctx["app"].state.engine) as db:
+        assert len(db.scalars(select(LicenseEvent).where(LicenseEvent.event_type == "renewal")).all()) == 1
+
+
+def test_two_distinct_concurrent_renewals_both_extend(ctx):
+    _, auth = setup(ctx)
+    first = activation(ctx, auth, issue(ctx)[0]).json()
+    codes = issue(ctx, duration=30, count=2)
+
+    def renew_once(code):
+        with TestClient(ctx["app"]) as client:
+            return client.post("/api/v1/licenses/renew", headers=auth, json={
+                "license_id": first["license_id"], "activation_code": code})
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        responses = list(executor.map(renew_once, codes))
+    assert [r.status_code for r in responses] == [200, 200], [r.text for r in responses]
+    final = ctx["client"].get(f"/api/v1/licenses/{first['license_id']}", headers=auth)
+    assert final.status_code == 200
+    assert final.json()["expires_at"] == "2027-02-18T10:00:00+00:00"
+    with Session(ctx["app"].state.engine) as db:
+        assert len(db.scalars(select(LicenseEvent).where(LicenseEvent.event_type == "renewal")).all()) == 2

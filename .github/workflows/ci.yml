@@ -44,5 +44,13 @@ jobs:
         run: |
           alembic upgrade head
           alembic check
+      - name: PostgreSQL migration roundtrip and schema drift check
+        run: |
+          export DATABASE_URL="$PROJECT_X_TEST_POSTGRESQL_URL"
+          alembic upgrade head
+          alembic check
+          alembic downgrade b85625159f44
+          alembic upgrade head
+          alembic check
       - name: Generated OpenAPI matches checked-in spec
         run: python -m scripts.export_openapi --check

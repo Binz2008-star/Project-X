@@ -62,6 +62,14 @@ The integration suite runs against isolated migrated SQLite schemas by default, 
 
 - Durations are exact **30/90-day periods** as requested, unlike the legacy local prototype's calendar months. Configurable via `LICENSE_DURATIONS_DAYS`; current active subscriptions extend from current expiry, expired from server now.
 - Trials are unique per authenticated user and product, regardless of devices or reinstalls. User identification still requires a production-grade identity provider to prevent account farming.
-- Code redemption changes code status and license in **one transaction** using `UPDATE ... WHERE status='issued' RETURNING`. A single code cannot be claimed twice; any subsequent error rolls it back.
+- Code redemption changes code status and license in **one transaction** using `UPDATE ... WHERE status='issued' RETURNING`. A single code can be **claimed** only once; a subsequent retry from the same authenticated account and original operation returns the existing license without granting time twice or writing duplicate events. Different accounts, operations and revoked licenses are rejected. Any exception in the initial transaction rolls back the claim and license together.
 - Product status `available` requires a nonempty rights reference entered by an admin, but that text alone does not prove commercial rights. This must be checked outside the service.
 - The public repository contains no actual customer data, sample production credentials, third-party IPA or app signing material.
+
+## Idempotent activation/renewal and device quota (follow-on hardening)
+
+A network timeout after a successful activation does not require a second code: resend **the same request**, with the same code and user token, to `/api/v1/licenses/activate` or `/api/v1/licenses/renew`. Replays of an already committed request return the current license snapshot without another extension. Different accounts or operation types cannot reuse that code. A later renewal may change the returned expiration compared with the initial response; read `/api/v1/licenses/{license_id}` for the authoritative current status. Old redemption records lacking operation provenance are not treated as retries.
+
+`MAX_DEVICES_PER_PRODUCT=5` (default) limits unrevoked registrations per account and product. Admin revocation releases a slot. All newly registered devices are **unverified**; because device attestation and feature binding are pending, **this limit does not enforce device-bound entitlement**. Do not market it as anti-sharing protection. API clients must never treat possession of a server-generated device ID as proof of physical identity.
+
+The additive Alembic migration `c8ad20261120_code_retry_operation.py` must be applied before starting the updated application; it supports a downgrade, but downgrading drops the operation-provenance field. Review and back up production data prior to migration, and never switch a live production database without an approved plan.
