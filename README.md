@@ -2,7 +2,7 @@
 
 Independent technology project for **authorized** iOS app enhancements, feature licensing, build infrastructure, and eventual distribution. The first goal is one legally viable, supportable product, not a consumer storefront.
 
-## Current implementation (phase 1)
+## Current implementation (phase 1, preserved)
 
 - [Original local licensing prototype](project_x/licensing.py): one-use activation codes, 7-day trials, monthly/quarterly entitlements independent of app-signing validity.
 - [Unit tests](tests/test_licensing.py) and GitHub Actions CI.
@@ -16,6 +16,20 @@ Run locally with Python 3.12+:
 python -m unittest discover -s tests -v
 ```
 
-**Not production-ready**: no public API, payments, app binaries, device-validated trials or live distribution. Product entries marked approved require verified legal rights before real use. No third-party IPA, decrypted binary, tweak source, Apple certificate or signing secret is stored here. The public repository should not receive credentials or customer data.
+**Not production-ready**: no public API, payments, app binaries, device-validated trials or live distribution. `approved` product entries require verified legal rights before real use. No third-party IPA, decrypted binary, tweak source, Apple certificate or signing secret is stored here. The public repository should not receive credentials or customer data.
 
 Swing reference: <https://github.com/theoccurrence/Swing>. We have deliberately **not** copied Swing into this repo: its top-level commercial reuse rights have not been established, and its dependencies and the source iOS applications must each be cleared separately. No relationship with Instagram, YouTube, Snapchat or TikTok is claimed.
+
+## Phase 2 — REST licensing API (separate draft branch)
+
+Implemented under `project_x/server/` using FastAPI, SQLAlchemy and Alembic.
+**New service is separate from the legacy SQLite LicenseStore**, which is kept for regression tests.
+
+- [API setup and local deployment](docs/API_SETUP.md)
+- [Full API contract (OpenAPI)](docs/openapi.json)
+- [Implementation status and pending production gates](docs/API_STATUS.md)
+- [Initial migration](migrations/versions/b85625159f44_initial_license_service_schema.py)
+- [SQLite and PostgreSQL integration tests](tests/test_api.py)
+
+No storefront, payment gateway, third-party IPA, commercial tweak source or signing keys.
+This is an engineered prototype and **must not be exposed as a live commercial API until the pending security gates are closed**.
