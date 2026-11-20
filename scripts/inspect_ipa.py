@@ -9,9 +9,16 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
-from project_x.ipa import ArchiveLimits, ArchiveSafetyError, inspect_ipa
+from project_x.ipa import (
+    AmbiguousAppRootError,
+    ArchiveLimits,
+    ArchiveSafetyError,
+    MalformedInfoPlistError,
+    inspect_ipa,
+)
 from project_x.ipa.bundle import BundleError
 
 
@@ -37,6 +44,22 @@ def _output_collides(input_path: str, output_path: str) -> bool:
         return os.path.samefile(source, target)
     except OSError:
         return False
+
+
+def _write_report(output_path: str, payload: str) -> None:
+    """Publish the report atomically without following a symlink at the target."""
+    target = Path(output_path)
+    descriptor, temporary_name = tempfile.mkstemp(prefix=".inspect-ipa-", dir=str(target.parent))
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(payload + "\n")
+        # os.replace() replaces the directory entry, not the symlink target,
+        # so a symlink swapped in after the collision check cannot redirect it.
+        os.replace(temporary, target)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
 
 
 def _summary(report) -> str:
@@ -103,6 +126,12 @@ def main(argv: list[str] | None = None) -> int:
     except ArchiveSafetyError as exc:
         print(f"REFUSED [{exc.code}] {exc.detail}", file=sys.stderr)
         return 2
+    except AmbiguousAppRootError as exc:
+        print(f"REFUSED [AMBIGUOUS_APPLICATION_ROOT] {exc}", file=sys.stderr)
+        return 2
+    except MalformedInfoPlistError as exc:
+        print(f"REFUSED [INVALID_INFO_PLIST_VALUE] {exc}", file=sys.stderr)
+        return 2
     except BundleError as exc:
         print(f"REFUSED [NOT_AN_APPLICATION_IPA] {exc}", file=sys.stderr)
         return 2
@@ -112,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = report.to_json()
     if args.json_out:
-        Path(args.json_out).write_text(payload + "\n", encoding="utf-8")
+        _write_report(args.json_out, payload)
 
     print(_summary(report) if args.summary else payload)
 

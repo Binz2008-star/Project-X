@@ -17,6 +17,54 @@ class BundleError(ValueError):
     """The archive does not contain a describable application bundle."""
 
 
+class AmbiguousAppRootError(BundleError):
+    """More than one top-level application root would make the report ambiguous."""
+
+
+class MalformedInfoPlistError(BundleError):
+    """An identity value has the wrong type or an unsafe shape."""
+
+
+def _optional_string(info: dict, key: str) -> str | None:
+    value = info.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise MalformedInfoPlistError(f"{key} must be a non-empty string when present")
+    return value
+
+
+def _device_families(value: object) -> tuple[int, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise MalformedInfoPlistError("UIDeviceFamily must be a list when present")
+    families: list[int] = []
+    for item in value:
+        if isinstance(item, bool):
+            raise MalformedInfoPlistError("UIDeviceFamily entries must not be booleans")
+        if isinstance(item, int):
+            families.append(item)
+        elif isinstance(item, str) and item.isdigit():
+            families.append(int(item))
+        else:
+            raise MalformedInfoPlistError("UIDeviceFamily entries must be integers")
+    return tuple(families)
+
+
+def _supported_platforms(value: object) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise MalformedInfoPlistError("CFBundleSupportedPlatforms must be a list when present")
+    platforms: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise MalformedInfoPlistError("CFBundleSupportedPlatforms entries must be strings")
+        platforms.append(item)
+    return tuple(platforms)
+
+
 @dataclass(frozen=True)
 class AppIdentity:
     bundle_id: str | None
@@ -93,22 +141,26 @@ def find_app_root(archive: SafeArchive) -> str:
     )
     if not candidates:
         raise BundleError("no Payload/*.app/Info.plist found; this is not an application IPA")
+    if len(candidates) > 1:
+        # Never list the candidate names: an attacker controls them and they may
+        # contain private paths or other sensitive text.
+        raise AmbiguousAppRootError(
+            f"more than one top-level application root was found ({len(candidates)} candidates)"
+        )
     return candidates[0]
 
 
 def identity_from_info(info: dict) -> AppIdentity:
-    families = info.get("UIDeviceFamily") or []
-    platforms = info.get("CFBundleSupportedPlatforms") or []
     return AppIdentity(
-        bundle_id=info.get("CFBundleIdentifier"),
-        name=info.get("CFBundleName"),
-        display_name=info.get("CFBundleDisplayName"),
-        version=info.get("CFBundleShortVersionString"),
-        build_number=info.get("CFBundleVersion"),
-        minimum_os=info.get("MinimumOSVersion"),
-        executable=info.get("CFBundleExecutable"),
-        device_families=tuple(int(x) for x in families if isinstance(x, (int, str)) and str(x).isdigit()),
-        supported_platforms=tuple(str(p) for p in platforms),
+        bundle_id=_optional_string(info, "CFBundleIdentifier"),
+        name=_optional_string(info, "CFBundleName"),
+        display_name=_optional_string(info, "CFBundleDisplayName"),
+        version=_optional_string(info, "CFBundleShortVersionString"),
+        build_number=_optional_string(info, "CFBundleVersion"),
+        minimum_os=_optional_string(info, "MinimumOSVersion"),
+        executable=_optional_string(info, "CFBundleExecutable"),
+        device_families=_device_families(info.get("UIDeviceFamily")),
+        supported_platforms=_supported_platforms(info.get("CFBundleSupportedPlatforms")),
     )
 
 

@@ -18,7 +18,7 @@ import re
 import struct
 import zipfile
 from dataclasses import dataclass
-from typing import Iterable
+from typing import BinaryIO, Iterable
 
 
 class ArchiveSafetyError(ValueError):
@@ -80,7 +80,7 @@ _ZIP64_MARKER = 0xFFFFFFFF
 _ZIP64_COUNT_MARKER = 0xFFFF
 
 
-def raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
+def raw_central_names(source: str | BinaryIO, max_entries: int) -> tuple[str, ...]:
     """Read entry names directly from the central directory.
 
     ``zipfile`` rewrites ``\\`` to ``/`` when it reads names on every platform,
@@ -88,13 +88,20 @@ def raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
     traversal. The central directory is the authoritative on-disk record, so
     that is what we validate here.
 
+    ``source`` may be a path or an already-open binary handle. Passing the same
+    handle used by :class:`SafeArchive` is what prevents a path swap between
+    the ZIP parser and the raw validation pass from producing a mixed report.
+
     Both classic and ZIP64 end-of-central-directory records are understood;
     large IPAs routinely use ZIP64 even when they do not need it. Structural
     failures are always reported as :class:`ArchiveSafetyError`, never as a
     raw ``struct.error`` from a malformed archive.
     """
     try:
-        return _raw_central_names(path, max_entries)
+        if hasattr(source, "seek") and hasattr(source, "read"):
+            return _raw_central_names_from_handle(source, max_entries)  # type: ignore[arg-type]
+        with open(source, "rb") as handle:
+            return _raw_central_names_from_handle(handle, max_entries)
     except ArchiveSafetyError:
         raise
     except (struct.error, OSError, ValueError) as exc:
@@ -103,11 +110,12 @@ def raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
         ) from exc
 
 
-def _raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
-    size = os.path.getsize(path)
-    tail_length = min(size, _MAX_ZIP_COMMENT + 22)
-    tail_start = size - tail_length
-    with open(path, "rb") as handle:
+def _raw_central_names_from_handle(handle: BinaryIO, max_entries: int) -> tuple[str, ...]:
+    saved_position = handle.tell()
+    try:
+        size = os.fstat(handle.fileno()).st_size
+        tail_length = min(size, _MAX_ZIP_COMMENT + 22)
+        tail_start = size - tail_length
         handle.seek(tail_start)
         tail = handle.read(tail_length)
 
@@ -232,38 +240,54 @@ def _raw_central_names(path: str, max_entries: int) -> tuple[str, ...]:
             except UnicodeDecodeError:
                 names.append(raw_name.decode("cp437", "replace"))
             handle.seek(extra_length + comment_length, os.SEEK_CUR)
-    return tuple(names)
+        return tuple(names)
+    finally:
+        handle.seek(saved_position)
 
 
 class SafeArchive:
     """Open a ZIP archive, validate its structure, and read entries under limits."""
 
-    def __init__(self, path: str, limits: ArchiveLimits | None = None) -> None:
+    def __init__(self, source: str | BinaryIO, limits: ArchiveLimits | None = None) -> None:
         self._limits = limits or ArchiveLimits()
-        self.path = path
+        self._owns_handle = not (hasattr(source, "seek") and hasattr(source, "read"))
+        if self._owns_handle:
+            self._handle: BinaryIO = open(source, "rb")  # type: ignore[arg-type]
+        else:
+            self._handle = source  # type: ignore[assignment]
+        self.path = getattr(source, "name", source)
         self.findings: list[dict] = []
         try:
-            self._zip = zipfile.ZipFile(path, "r")
+            self._zip = zipfile.ZipFile(self._handle, "r")
         except zipfile.BadZipFile as exc:
+            self._release()
             raise ArchiveSafetyError("NOT_A_ZIP", f"not a readable ZIP container: {exc}") from exc
         except OSError as exc:
+            self._release()
             raise ArchiveSafetyError("UNREADABLE_ARCHIVE", str(exc)) from exc
         try:
             self._entries = {info.filename: info for info in self._zip.infolist()}
             self._names = tuple(info.filename for info in self._zip.infolist())
             # Validate what is actually on disk before trusting zipfile's view.
-            self._raw_names = raw_central_names(path, self._limits.max_entries)
+            # Using the same handle closes the path-swap gap between the ZIP
+            # parser and the raw central-directory validator.
+            self._raw_names = raw_central_names(self._handle, self._limits.max_entries)
             for name in self._raw_names:
                 self._validate_name(name)
             self._validate()
         except Exception:
-            self._zip.close()
+            self.close()
             raise
 
     # -- lifecycle ---------------------------------------------------------
 
+    def _release(self) -> None:
+        if self._owns_handle:
+            self._handle.close()
+
     def close(self) -> None:
         self._zip.close()
+        self._release()
 
     def __enter__(self) -> "SafeArchive":
         return self

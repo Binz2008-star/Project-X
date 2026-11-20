@@ -51,7 +51,10 @@ _CPU_TYPES = {
     0x0100000C: "arm64",
 }
 
-_ARM64_SUBTYPES = {0: "arm64", 1: "arm64v8", 2: "arm64e"}
+# CPU subtype 1 is arm64v8, an alias within the arm64 family, not a separate
+# architecture vocabulary. Reporting it as arm64v8 made compatible binaries
+# look unsupported downstream.
+_ARM64_SUBTYPES = {0: "arm64", 1: "arm64", 2: "arm64e"}
 
 _FILE_TYPES = {
     1: "MH_OBJECT",

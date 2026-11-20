@@ -19,6 +19,7 @@ FAT_MAGIC = 0xCAFEBABE
 LC_BUILD_VERSION = 0x32
 LC_RPATH = 0x8000001C
 LC_LOAD_DYLIB = 0xC
+LC_LOAD_WEAK_DYLIB = 0x80000018
 LC_ID_DYLIB = 0xD
 LC_ENCRYPTION_INFO_64 = 0x2C
 
@@ -102,6 +103,7 @@ def build_macho(
     min_os: str | None = "16.3",
     file_type: int = MH_EXECUTE,
     cpu_type: int = CPU_ARM64,
+    cpu_subtype: int = 0,
 ) -> bytes:
     commands: list[bytes] = []
     if min_os:
@@ -115,7 +117,7 @@ def build_macho(
 
     body = b"".join(commands)
     header = struct.pack(
-        "<IiiIIIII", MH_MAGIC_64, cpu_type, 0, file_type, len(commands), len(body), 0, 0
+        "<IiiIIIII", MH_MAGIC_64, cpu_type, cpu_subtype, file_type, len(commands), len(body), 0, 0
     )
     return header + body
 

@@ -31,7 +31,7 @@ class ProvisioningProfileSummary:
     provisioned_device_count: int | None
     entitlement_keys: tuple[str, ...]
     platforms: tuple[str, ...]
-    is_xcode_managed: bool | None
+    provisions_all_devices: bool | None
 
     def to_dict(self) -> dict:
         expires = self.expires_at
@@ -44,33 +44,33 @@ class ProvisioningProfileSummary:
             "provisioned_device_count": self.provisioned_device_count,
             "entitlement_keys": list(self.entitlement_keys),
             "platforms": list(self.platforms),
-            "is_xcode_managed": self.is_xcode_managed,
+            "provisions_all_devices": self.provisions_all_devices,
         }
 
 
 @dataclass(frozen=True)
 class SigningReport:
     app_code_resources_present: bool
-    app_signature_file_count: int
+    code_signature_entry_count: int
     provisioning_profile_present: bool
     provisioning_profile: ProvisioningProfileSummary | None
     fairplay_metadata_present: bool
     nested_bundles_total: int
-    nested_bundles_signed: int
+    nested_bundles_with_signature_metadata: int
     nested_bundles_unsigned: tuple[str, ...] = field(default_factory=tuple)
     verification: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
             "app_code_resources_present": self.app_code_resources_present,
-            "app_signature_file_count": self.app_signature_file_count,
+            "code_signature_entry_count": self.code_signature_entry_count,
             "provisioning_profile_present": self.provisioning_profile_present,
             "provisioning_profile": (
                 self.provisioning_profile.to_dict() if self.provisioning_profile else None
             ),
             "fairplay_metadata_present": self.fairplay_metadata_present,
             "nested_bundles_total": self.nested_bundles_total,
-            "nested_bundles_signed": self.nested_bundles_signed,
+            "nested_bundles_with_signature_metadata": self.nested_bundles_with_signature_metadata,
             "nested_bundles_unsigned": list(self.nested_bundles_unsigned),
             "verification": dict(self.verification),
         }
@@ -102,6 +102,7 @@ def _summarise_profile(profile: dict) -> ProvisioningProfileSummary:
     devices = profile.get("ProvisionedDevices")
     teams = profile.get("TeamIdentifier") or []
     platforms = profile.get("Platform") or []
+    all_devices = profile.get("ProvisionsAllDevices")
     return ProvisioningProfileSummary(
         name=profile.get("Name"),
         team_identifiers=tuple(str(t) for t in teams) if isinstance(teams, list) else (str(teams),),
@@ -109,44 +110,61 @@ def _summarise_profile(profile: dict) -> ProvisioningProfileSummary:
         provisioned_device_count=len(devices) if isinstance(devices, list) else None,
         entitlement_keys=tuple(sorted(str(k) for k in entitlements)) if isinstance(entitlements, dict) else (),
         platforms=tuple(str(p) for p in platforms) if isinstance(platforms, list) else (str(platforms),),
-        is_xcode_managed=profile.get("ProvisionsAllDevices"),
+        provisions_all_devices=all_devices if isinstance(all_devices, bool) else None,
     )
+
+
+def _profile_parse_reason(blob: bytes) -> str | None:
+    """Return a fixed reason when a present profile cannot be summarised."""
+    start = blob.find(_PLIST_START)
+    if start < 0 or blob.find(_PLIST_END, start) < 0:
+        return "PLIST_MISSING"
+    return "PLIST_INVALID"
 
 
 def inspect_signing(
     archive: SafeArchive,
     app_root: str,
     nested_bundles: list[tuple[str, bool]],
-) -> SigningReport:
-    """Collect signature metadata and nested coverage for one application bundle."""
+) -> tuple[SigningReport, str | None]:
+    """Collect signature metadata and any fixed unreadable-profile reason."""
     code_signature_dir = app_root + "_CodeSignature/"
     app_code_resources = (code_signature_dir + "CodeResources") in archive.names
-    signature_files = sum(1 for name in archive.names if name.startswith(code_signature_dir))
+    signature_entry_count = sum(1 for name in archive.names if name.startswith(code_signature_dir))
 
     profile_path = app_root + "embedded.mobileprovision"
     profile_summary: ProvisioningProfileSummary | None = None
+    profile_reason: str | None = None
     profile_present = archive.has(profile_path)
     if profile_present:
+        raw: bytes | None = None
         try:
             raw = archive.read(profile_path, max_bytes=MAX_PROVISIONING_BYTES)
+        except (KeyError, OSError):
+            profile_reason = "READ_ERROR"
+        except Exception:
+            # ArchiveSafetyError and any unexpected parser failure are reported
+            # with one fixed reason; raw exception text is never emitted.
+            profile_reason = "READ_ERROR"
+        if raw is not None:
             parsed = extract_embedded_plist(raw)
             if parsed is not None:
                 profile_summary = _summarise_profile(parsed)
-        except Exception:
-            profile_summary = None
+            else:
+                profile_reason = _profile_parse_reason(raw)
 
     fairplay_present = any(name.startswith(app_root + "SC_Info/") for name in archive.names)
 
     unsigned = tuple(path for path, signed in nested_bundles if not signed)
 
-    return SigningReport(
+    report = SigningReport(
         app_code_resources_present=app_code_resources,
-        app_signature_file_count=signature_files,
+        code_signature_entry_count=signature_entry_count,
         provisioning_profile_present=profile_present,
         provisioning_profile=profile_summary,
         fairplay_metadata_present=fairplay_present,
         nested_bundles_total=len(nested_bundles),
-        nested_bundles_signed=len(nested_bundles) - len(unsigned),
+        nested_bundles_with_signature_metadata=len(nested_bundles) - len(unsigned),
         nested_bundles_unsigned=unsigned,
         verification={
             "verified": False,
@@ -157,3 +175,4 @@ def inspect_signing(
             ),
         },
     )
+    return report, profile_reason

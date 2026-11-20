@@ -35,6 +35,15 @@ class FrameworkRef:
 
 
 @dataclass(frozen=True)
+class DependencyRef:
+    name: str
+    kind: str
+
+    def to_dict(self) -> dict:
+        return {"name": self.name, "kind": self.kind}
+
+
+@dataclass(frozen=True)
 class DependencyAnalysis:
     frameworks: tuple[FrameworkRef, ...]
     rpath_dependencies: tuple[str, ...]
@@ -42,6 +51,9 @@ class DependencyAnalysis:
     unresolved_rpath_dependencies: tuple[str, ...]
     protected_frameworks: tuple[str, ...]
     duplicate_framework_basenames: tuple[str, ...]
+    rpath_dependency_refs: tuple[DependencyRef, ...] = ()
+    executable_path_dependency_refs: tuple[DependencyRef, ...] = ()
+    unresolved_rpath_dependency_refs: tuple[DependencyRef, ...] = ()
 
     def to_dict(self) -> dict:
         return {
@@ -51,6 +63,13 @@ class DependencyAnalysis:
             "unresolved_rpath_dependencies": list(self.unresolved_rpath_dependencies),
             "protected_frameworks": list(self.protected_frameworks),
             "duplicate_framework_basenames": list(self.duplicate_framework_basenames),
+            "rpath_dependency_refs": [r.to_dict() for r in self.rpath_dependency_refs],
+            "executable_path_dependency_refs": [
+                r.to_dict() for r in self.executable_path_dependency_refs
+            ],
+            "unresolved_rpath_dependency_refs": [
+                r.to_dict() for r in self.unresolved_rpath_dependency_refs
+            ],
         }
 
 
@@ -94,13 +113,36 @@ def analyse_dependencies(
             )
         )
 
-    rpath_deps = sorted({d.name for d in main_dylibs if d.kind in _LINKING_KINDS and d.name.startswith("@rpath/")})
-    executable_deps = sorted(
-        {d.name for d in main_dylibs if d.kind in _LINKING_KINDS and d.name.startswith("@executable_path/")}
+    rpath_refs = tuple(
+        sorted(
+            {
+                (d.name, d.kind)
+                for d in main_dylibs
+                if d.kind in _LINKING_KINDS and d.name.startswith("@rpath/")
+            }
+        )
     )
+    executable_refs = tuple(
+        sorted(
+            {
+                (d.name, d.kind)
+                for d in main_dylibs
+                if d.kind in _LINKING_KINDS and d.name.startswith("@executable_path/")
+            }
+        )
+    )
+    rpath_dependency_refs = tuple(DependencyRef(name, kind) for name, kind in rpath_refs)
+    executable_path_dependency_refs = tuple(
+        DependencyRef(name, kind) for name, kind in executable_refs
+    )
+    rpath_deps = tuple(sorted({ref.name for ref in rpath_dependency_refs}))
+    executable_deps = tuple(sorted({ref.name for ref in executable_path_dependency_refs}))
 
     local = {f.basename for f in frameworks}
-    unresolved = tuple(dep for dep in rpath_deps if framework_basename(dep) not in local)
+    unresolved_refs = tuple(
+        ref for ref in rpath_dependency_refs if framework_basename(ref.name) not in local
+    )
+    unresolved = tuple(sorted({ref.name for ref in unresolved_refs}))
     protected = tuple(sorted({framework_basename(dep) for dep in rpath_deps} & local))
 
     seen: dict[str, int] = {}
@@ -110,9 +152,12 @@ def analyse_dependencies(
 
     return DependencyAnalysis(
         frameworks=tuple(frameworks),
-        rpath_dependencies=tuple(rpath_deps),
-        executable_path_dependencies=tuple(executable_deps),
+        rpath_dependencies=rpath_deps,
+        executable_path_dependencies=executable_deps,
         unresolved_rpath_dependencies=unresolved,
         protected_frameworks=protected,
         duplicate_framework_basenames=duplicates,
+        rpath_dependency_refs=rpath_dependency_refs,
+        executable_path_dependency_refs=executable_path_dependency_refs,
+        unresolved_rpath_dependency_refs=unresolved_refs,
     )
