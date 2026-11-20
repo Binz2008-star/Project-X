@@ -69,9 +69,36 @@ runners with no Apple credentials.
 - Workflow: `.github/workflows/xinsta-core-build.yml` (`macos-15`).
 - `build-dylib.sh` compiles `libXinstaCore.dylib` for `arm64-apple-ios16.3`,
   unsigned, and verifies the Mach-O header.
-- `run-tests.sh` compiles and runs 17 Foundation-only assertions covering
+- `run-tests.sh` compiles and runs 19 Foundation-only assertions covering
   feature registration, settings persistence/toggles, and compatibility
   fail-closed behaviour.
+
+### Build evidence
+
+GitHub Actions run `44823280434` (push of `dd2db06b278164052d10e7937aab70149e849d34`,
+`macos-15-arm64`, Xcode 16.4 / SDK 18.5) completed successfully on 2026-11-20:
+
+```
+file: Mach-O 64-bit dynamically linked shared library arm64
+MH_MAGIC_64   ARM64   ALL  0x00  DYLIB  20  2984  NOUNDEFS DYLDLINK TWOLEVEL NO_REEXPORTED_DYLIBS
+    cmd LC_BUILD_VERSION
+ platform 2
+    minos 16.3
+      sdk 18.5
+Xinsta Core artifact validation passed
+XinstaCore tests: 19 passed, 0 failed
+Xinsta Core artifact verified: arm64 iOS Mach-O dylib
+```
+
+`platform 2` is `PLATFORM_IOS`, confirming the iOS load command. Artifact
+validation is fail-closed: existence, non-empty size, 64-bit Mach-O type,
+ARM64 architecture, `MH_DYLIB` filetype, and iOS platform are all checked
+explicitly with no suppressed failures (`|| true` was removed). Strict compiler
+flags (`-O2 -Wall -Wextra -Werror`) are unchanged.
+
+The parallel licensing API suite (run `44823281181`) also passed on the same
+commit. These runs prove only the unsigned dylib compile, Core tests, and
+artifact structure — not Instagram integration or device behaviour.
 
 To reproduce locally on macOS:
 
