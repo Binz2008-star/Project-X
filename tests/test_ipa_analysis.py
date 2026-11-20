@@ -15,7 +15,15 @@ from pathlib import Path
 
 import pytest
 
-from project_x.ipa import ArchiveLimits, ArchiveSafetyError, inspect_ipa
+import project_x.ipa.inspector as inspector_module
+import project_x.ipa.safety as safety_module
+from project_x.ipa import (
+    AmbiguousAppRootError,
+    ArchiveLimits,
+    ArchiveSafetyError,
+    MalformedInfoPlistError,
+    inspect_ipa,
+)
 from project_x.ipa.bundle import BundleError
 from project_x.ipa.report import SCHEMA_VERSION
 from project_x.ipa.safety import raw_central_names
@@ -28,6 +36,7 @@ FAT_MAGIC = 0xCAFEBABE
 LC_BUILD_VERSION = 0x32
 LC_RPATH = 0x8000001C
 LC_LOAD_DYLIB = 0xC
+LC_LOAD_WEAK_DYLIB = 0x80000018
 LC_ID_DYLIB = 0xD
 LC_ENCRYPTION_INFO_64 = 0x2C
 
@@ -101,6 +110,7 @@ def build_macho(
     min_os: str | None = "16.3",
     file_type: int = MH_EXECUTE,
     cpu_type: int = CPU_ARM64,
+    cpu_subtype: int = 0,
 ) -> bytes:
     commands: list[bytes] = []
     if min_os:
@@ -114,7 +124,7 @@ def build_macho(
 
     body = b"".join(commands)
     header = struct.pack(
-        "<IiiIIIII", MH_MAGIC_64, cpu_type, 0, file_type, len(commands), len(body), 0, 0
+        "<IiiIIIII", MH_MAGIC_64, cpu_type, cpu_subtype, file_type, len(commands), len(body), 0, 0
     )
     return header + body
 
@@ -319,7 +329,7 @@ def test_extension_inventory_and_signature_coverage(tmp_path: Path):
     assert extension["executable_present"] is True
 
     assert report.signing.nested_bundles_total == 1
-    assert report.signing.nested_bundles_signed == 1
+    assert report.signing.nested_bundles_with_signature_metadata == 1
     assert "UNSIGNED_NESTED_BUNDLE" not in finding_codes(report)
 
 
@@ -720,3 +730,216 @@ def test_analysis_does_not_modify_input(tmp_path: Path):
     inspect_ipa(path)
 
     assert (path.read_bytes(), path.stat().st_mtime_ns, path.stat().st_size) == before
+
+
+# --------------------------------------------------------------------------
+# Review blockers A7-1 through A7-8
+# --------------------------------------------------------------------------
+
+
+def test_single_descriptor_is_used_for_parsing_and_hashing(tmp_path: Path, monkeypatch):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("inspector reopened the archive path")
+
+    monkeypatch.setattr(inspector_module, "sha256_of_file", forbidden)
+    monkeypatch.setattr(inspector_module.os.path, "getsize", forbidden)
+
+    original = safety_module.raw_central_names
+    observed: list[object] = []
+
+    def spy(source, max_entries):
+        observed.append(source)
+        return original(source, max_entries)
+
+    monkeypatch.setattr(safety_module, "raw_central_names", spy)
+    report = inspect_ipa(path)
+
+    assert report.artifact.sha256 == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert observed
+    assert all(not isinstance(source, (str, Path)) for source in observed)
+
+
+def test_descriptor_change_during_analysis_is_refused(tmp_path: Path, monkeypatch):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    original = inspector_module._descriptor_marker
+    calls = {"count": 0}
+
+    def changing_marker(handle):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            first = list(original(handle))
+            first[3] += 1
+            return tuple(first)
+        return original(handle)
+
+    monkeypatch.setattr(inspector_module, "_descriptor_marker", changing_marker)
+    with pytest.raises(ArchiveSafetyError) as excinfo:
+        inspect_ipa(path)
+    assert excinfo.value.code == "ARCHIVE_CHANGED_DURING_ANALYSIS"
+
+
+def test_ambiguous_top_level_application_roots_are_refused(tmp_path: Path):
+    entries = base_entries()
+    second = "Payload/Second.app/"
+    entries[second + "Info.plist"] = plistlib.dumps(DEFAULT_INFO, fmt=plistlib.FMT_BINARY)
+    entries[second + "Demo"] = build_macho()
+    path = write_ipa(tmp_path / "Ambiguous.ipa", entries)
+
+    with pytest.raises(AmbiguousAppRootError):
+        inspect_ipa(path)
+
+
+def test_nested_app_does_not_make_root_ambiguous(tmp_path: Path):
+    entries = base_entries()
+    entries[APP + "PlugIns/Widget.app/Info.plist"] = plistlib.dumps(
+        DEFAULT_INFO, fmt=plistlib.FMT_BINARY
+    )
+    report = inspect_ipa(write_ipa(tmp_path / "Nested.ipa", entries))
+    assert report.identity.bundle_id == "com.example.demo"
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("CFBundleIdentifier", 123),
+        ("CFBundleExecutable", ["Demo"]),
+        ("CFBundleShortVersionString", {"major": 1}),
+        ("CFBundleVersion", ""),
+        ("MinimumOSVersion", True),
+        ("CFBundleName", []),
+        ("CFBundleDisplayName", 0),
+        ("UIDeviceFamily", {"device": 1}),
+        ("UIDeviceFamily", [True]),
+        ("CFBundleSupportedPlatforms", 5),
+        ("CFBundleSupportedPlatforms", ["iPhoneOS", 2]),
+    ],
+)
+def test_malformed_info_plist_values_are_refused(tmp_path: Path, key, value):
+    info = dict(DEFAULT_INFO)
+    info[key] = value
+    path = write_ipa(
+        tmp_path / "Malformed.ipa",
+        {APP + "Info.plist": plistlib.dumps(info, fmt=plistlib.FMT_BINARY), APP + "Demo": build_macho()},
+    )
+    with pytest.raises(MalformedInfoPlistError):
+        inspect_ipa(path)
+
+
+def test_cli_maps_malformed_info_plist_to_stable_code(tmp_path: Path, capsys):
+    info = dict(DEFAULT_INFO)
+    info["CFBundleIdentifier"] = 123
+    path = write_ipa(
+        tmp_path / "Malformed.ipa",
+        {APP + "Info.plist": plistlib.dumps(info, fmt=plistlib.FMT_BINARY), APP + "Demo": build_macho()},
+    )
+    assert cli_main([str(path)]) == 2
+    assert "INVALID_INFO_PLIST_VALUE" in capsys.readouterr().err
+
+
+def test_cli_maps_ambiguous_root_to_stable_code(tmp_path: Path, capsys):
+    entries = base_entries()
+    second = "Payload/Second.app/"
+    entries[second + "Info.plist"] = plistlib.dumps(DEFAULT_INFO, fmt=plistlib.FMT_BINARY)
+    entries[second + "Demo"] = build_macho()
+    path = write_ipa(tmp_path / "Ambiguous.ipa", entries)
+    assert cli_main([str(path)]) == 2
+    assert "AMBIGUOUS_APPLICATION_ROOT" in capsys.readouterr().err
+
+
+def test_unreadable_provisioning_profile_is_reported(tmp_path: Path):
+    entries = base_entries()
+    entries[APP + "embedded.mobileprovision"] = b"not-a-profile"
+    report = inspect_ipa(write_ipa(tmp_path / "Profile.ipa", entries))
+
+    profile_finding = finding(report, "PROVISIONING_PROFILE_UNREADABLE")
+    assert profile_finding is not None
+    assert profile_finding.severity == "warning"
+    assert profile_finding.context["reason"] in {"PLIST_MISSING", "PLIST_INVALID"}
+    assert report.signing.provisioning_profile is None
+
+
+def test_valid_provisioning_profile_summary_uses_accurate_field_names(tmp_path: Path):
+    plist = plistlib.dumps(
+        {
+            "Name": "Demo Profile",
+            "TeamIdentifier": ["TEAM123"],
+            "ProvisionsAllDevices": True,
+        },
+        fmt=plistlib.FMT_XML,
+    )
+    entries = base_entries()
+    entries[APP + "embedded.mobileprovision"] = b"CMS-header" + plist + b"CMS-footer"
+    report = inspect_ipa(write_ipa(tmp_path / "Profile.ipa", entries))
+
+    assert "PROVISIONING_PROFILE_UNREADABLE" not in finding_codes(report)
+    assert report.signing.provisioning_profile is not None
+    assert report.signing.provisioning_profile.provisions_all_devices is True
+    payload = report.to_dict()["signing"]["provisioning_profile"]
+    assert "is_xcode_managed" not in payload
+    assert payload["provisions_all_devices"] is True
+    signing = report.to_dict()["signing"]
+    assert "app_signature_file_count" not in signing
+    assert "nested_bundles_signed" not in signing
+    assert signing["code_signature_entry_count"] == 1
+
+
+def test_weak_unresolved_rpath_dependency_is_a_warning_with_kind(tmp_path: Path):
+    entries = base_entries(
+        executable=build_macho(
+            dylibs=(("@rpath/Missing.framework/Missing", LC_LOAD_WEAK_DYLIB),)
+        )
+    )
+    report = inspect_ipa(write_ipa(tmp_path / "Weak.ipa", entries))
+    refs = report.dependencies.unresolved_rpath_dependency_refs
+
+    assert len(refs) == 1
+    assert refs[0].name == "@rpath/Missing.framework/Missing"
+    assert refs[0].kind == "weak"
+    assert finding(report, "WEAK_UNRESOLVED_RPATH_DEPENDENCY").severity == "warning"
+    assert finding(report, "UNRESOLVED_RPATH_DEPENDENCY") is None
+
+
+def test_required_and_weak_unresolved_rpath_dependencies_are_distinct(tmp_path: Path):
+    entries = base_entries(
+        executable=build_macho(
+            dylibs=(
+                ("@rpath/Required.framework/Required", LC_LOAD_DYLIB),
+                ("@rpath/Optional.framework/Optional", LC_LOAD_WEAK_DYLIB),
+            )
+        )
+    )
+    report = inspect_ipa(write_ipa(tmp_path / "Mixed.ipa", entries))
+
+    assert {ref.kind for ref in report.dependencies.unresolved_rpath_dependency_refs} == {
+        "load",
+        "weak",
+    }
+    assert finding(report, "UNRESOLVED_RPATH_DEPENDENCY").severity == "critical"
+    assert finding(report, "WEAK_UNRESOLVED_RPATH_DEPENDENCY").severity == "warning"
+
+
+@pytest.mark.parametrize(("subtype", "arch"), [(0, "arm64"), (1, "arm64"), (2, "arm64e")])
+def test_arm64_subtypes_are_normalised(tmp_path: Path, subtype, arch):
+    entries = base_entries(executable=build_macho(cpu_subtype=subtype))
+    report = inspect_ipa(write_ipa(tmp_path / "Demo.ipa", entries))
+    assert [slc.arch for slc in report.macho_slices] == [arch]
+
+
+def test_cli_does_not_follow_output_symlink(tmp_path: Path, capsys):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    sentinel = tmp_path / "sentinel.txt"
+    sentinel.write_text("DO-NOT-OVERWRITE", encoding="utf-8")
+    output = tmp_path / "report.json"
+    try:
+        output.symlink_to(sentinel)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks are unavailable on this filesystem")
+
+    assert cli_main([str(path), "--json", str(output)]) == 0
+    capsys.readouterr()
+    assert sentinel.read_text(encoding="utf-8") == "DO-NOT-OVERWRITE"
+    assert output.is_file() and not output.is_symlink()
+    assert "schema_version" in output.read_text(encoding="utf-8")
+    assert not list(tmp_path.glob(".inspect-ipa-*"))

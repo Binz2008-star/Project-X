@@ -15,9 +15,9 @@ from .collisions import DependencyAnalysis
 from .macho import MachOSlice
 from .signing import SigningReport
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 ANALYZER_NAME = "project-x-ipa"
-ANALYZER_VERSION = "0.1.0"
+ANALYZER_VERSION = "0.2.0"
 
 SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 

@@ -5,17 +5,19 @@ Public surface: :func:`inspect_ipa` returns a versioned
 standard library only, so analysis runs identically on Windows, macOS and CI
 without an Apple toolchain.
 """
-from .bundle import AppIdentity, BundleError, EmbeddedBundle
+from .bundle import AmbiguousAppRootError, AppIdentity, BundleError, EmbeddedBundle, MalformedInfoPlistError
 from .inspector import inspect_ipa, sha256_of_file
 from .report import SCHEMA_VERSION, Finding, IpaInspectionReport
 from .safety import ArchiveLimits, ArchiveSafetyError, SafeArchive
 
 __all__ = [
+    "AmbiguousAppRootError",
     "ArchiveLimits",
     "ArchiveSafetyError",
     "AppIdentity",
     "BundleError",
     "EmbeddedBundle",
+    "MalformedInfoPlistError",
     "Finding",
     "IpaInspectionReport",
     "SCHEMA_VERSION",

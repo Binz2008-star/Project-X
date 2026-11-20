@@ -1,8 +1,9 @@
 # IPA Analysis Engine — architecture and operating notes
 
-Status: **Phase 1 implemented, verified locally and against the reference IPA; no database
-changes in this increment.** This document describes what the code does today and what is
-explicitly out of scope.
+Status: **Phase 1 implemented and verified with synthetic fixtures in public CI; no database
+changes in this increment.** An earlier read-only check of an owner-provided artifact is
+retained in the owner's private log and is not reproducible from this repository. This
+document describes what the code does today and what is explicitly out of scope.
 
 ## 1. Scope and guarantees
 
@@ -27,8 +28,8 @@ Non-guarantees, stated in every report:
 - Presence of `_CodeSignature` **does not verify a signature**. Verification requires the
   Apple trust chain and a signing identity; reports always carry
   `signing.verification.verified = false`.
-- A cleared `cryptid` means the App Store encryption wrapper has been removed. It says
-  nothing about who did it.
+- A cleared `cryptid` means the Mach-O encryption flag is unset. It is not proof of how that
+  state was reached, who changed it, or whether any wrapper was removed.
 
 ## 2. Module map
 
@@ -39,8 +40,8 @@ Non-guarantees, stated in every report:
 | `project_x/ipa/bundle.py` | Locates `Payload/*.app`, reads `Info.plist`, builds the identity, and inventories `.appex`, `.framework` and `.bundle` directories with their own plists and signature coverage. |
 | `project_x/ipa/collisions.py` | Resolves `@rpath`/`@executable_path` references against embedded frameworks, reports protected basenames, unresolved dependencies and duplicate basenames. It flags potential collisions before any injection; static basename analysis alone does not prove an injection will work. |
 | `project_x/ipa/signing.py` | Reads signature *metadata*: `CodeResources`, provisioning-profile summary, FairPlay `SC_Info/`, nested bundle coverage. Never verifies. |
-| `project_x/ipa/report.py` | The versioned JSON contract (`schema_version = "1.0"`) and severity-ordered findings. This is the interface Phase 2 registries should consume. |
-| `project_x/ipa/inspector.py` | Orchestration and SHA-256. |
+| `project_x/ipa/report.py` | The versioned JSON contract (`schema_version = "1.1"`) and severity-ordered findings. This is the interface Phase 2 registries should consume. |
+| `project_x/ipa/inspector.py` | Orchestration. The archive is opened once; parsing, raw-name validation, entry reads and hashing use the same descriptor. |
 | `scripts/inspect_ipa.py` | CLI: `--summary`, `--json`, `--no-hash`, `--fail-on-critical`, limit overrides. |
 
 ## 3. Safety model
@@ -54,6 +55,36 @@ entry/read-size overruns.
 The raw central-directory scan exists because Python's `zipfile` rewrites `\` to `/` on every
 platform. Validating only `ZipFile.infolist()` would miss a Windows traversal attempt
 entirely. Both classic and ZIP64 end-of-central-directory records are parsed.
+
+### 3.1 Review-closure corrections (A7-1 … A7-7)
+
+- **A7-1 / provenance:** the archive path is opened once. `zipfile`, the raw central-directory
+  scan, all entry reads and the SHA-256 hash use the same descriptor. A size/mtime change
+  detected before completion raises `ARCHIVE_CHANGED_DURING_ANALYSIS` rather than returning a
+  report that mixes bytes from two files.
+- **A7-2 / ambiguity:** more than one top-level `Payload/*.app/` root raises
+  `AmbiguousAppRootError`; the CLI maps it to `REFUSED [AMBIGUOUS_APPLICATION_ROOT]`. Nested
+  `.app` bundles are still inventoried normally.
+- **A7-3 / metadata types:** identity values are type- and shape-checked. Wrong types, empty
+  strings, bad `UIDeviceFamily` entries and bad platform lists raise
+  `MalformedInfoPlistError`; the CLI maps it to `REFUSED [INVALID_INFO_PLIST_VALUE]`.
+- **A7-4 / unreadable profiles:** a present but unparsable `embedded.mobileprovision` emits a
+  `PROVISIONING_PROFILE_UNREADABLE` warning with a fixed reason (`PLIST_MISSING`,
+  `PLIST_INVALID` or `READ_ERROR`). No parser text or profile contents are copied.
+- **A7-5 / signing names:** `nested_bundles_signed` is replaced by
+  `nested_bundles_with_signature_metadata`, `app_signature_file_count` by
+  `code_signature_entry_count`, and `is_xcode_managed` by `provisions_all_devices`. These
+  names describe metadata presence, not signature validity. The report schema is now `1.1`.
+- **A7-6 / output safety:** `--json` writes to a temporary file in the destination directory
+  and publishes it with `os.replace()`, so a symlink swapped in at the target cannot redirect
+  the write. A collision with the input path is still refused.
+- **A7-7 / weak dependencies:** dependency refs retain their Mach-O load-command `kind`.
+  Required unresolved `@rpath` references remain `UNRESOLVED_RPATH_DEPENDENCY` (critical);
+  weak ones emit `WEAK_UNRESOLVED_RPATH_DEPENDENCY` (warning). CPU subtype `1` is normalised
+  to `arm64` instead of the misleading `arm64v8`.
+
+Downstream consumers must accept schema `1.1`. No private field names, local paths or raw
+parser text are emitted by the new refusal codes.
 
 ## 4. Phase 2 foundation
 
@@ -80,21 +111,19 @@ The analysis tests use only synthesised fixtures: a hand-built Mach-O header and
 containers generated in `tmp_path`. No third-party IPA is committed, downloaded or required
 by CI.
 
-## 6. Reference IPA result (independently re-verified)
+## 6. Earlier owner-provided artifact check (not CI-reproducible)
 
-A read-only inspection of the owner-provided third-party reference IPA confirmed the
-previously reported identity, version/build, minimum iOS version, arm64-only architecture
-and `cryptid = 0`. The archive contained 3,563 entries, 8 extensions, 6 frameworks and 9
-resource bundles. Signature metadata (`CodeResources`) was present, no provisioning profile
-and no `SC_Info` were present, and all 14 nested extensions/frameworks had signature
-metadata. No unresolved `@rpath` dependency and no duplicate framework basename was found.
+An earlier local, read-only run against an owner-provided artifact was recorded in the
+owner's private verification log. It observed the identity, version/build, minimum iOS
+version, arm64 architecture and `cryptid = 0` reported previously, plus the archive counts
+and nested signature metadata described in that log. That run is **not** reproducible in
+public CI because no third-party bytes are committed and no private path, hash or device
+identifier is published here. It is historical evidence only: it does not prove signature
+validity, tweak compatibility, or behaviour on any device, and no dynamic test was run.
 
-Findings were informational only: the encryption flag is cleared and several embedded
-framework basenames are already linked by the host binary. Neither finding establishes
-tweak compatibility, and signature validity is not asserted. The full hash and inventory
-are kept in the owner's local verification log rather than in this public document. This
-also confirms every studied reference project targets an older app version; no dynamic test
-has been run.
+All claims verified by this repository's CI come from synthetic, owned fixtures generated in
+`tmp_path`. The reference check is mentioned solely to explain the origin of the analyzer
+requirements, not as a pass criterion for this PR.
 
 ## 7. Windows vs macOS division
 
