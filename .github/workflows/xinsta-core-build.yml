@@ -1,0 +1,46 @@
+name: Xinsta Core (macOS build + tests)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ios/XinstaCore/**'
+      - '.github/workflows/xinsta-core-build.yml'
+  push:
+    branches:
+      - 'feature/xinsta-core'
+    paths:
+      - 'ios/XinstaCore/**'
+      - '.github/workflows/xinsta-core-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Unsigned dylib compile + Core tests
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk macosx --show-sdk-version
+
+      - name: Compile unsigned iOS dylib
+        run: bash ios/XinstaCore/Scripts/build-dylib.sh
+
+      - name: Run Foundation-only Core tests
+        run: bash ios/XinstaCore/Scripts/run-tests.sh
+
+      - name: Verify artifact is an arm64 Mach-O dylib
+        run: |
+          file build/libXinstaCore.dylib
+          test -s build/libXinstaCore.dylib
+          otool -hv build/libXinstaCore.dylib | grep -E 'MH_DYLIB|ARM64'
+          echo "Xinsta Core artifact verified"
