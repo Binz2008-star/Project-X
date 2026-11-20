@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - 'ios/XinstaCore/**'
+      - 'docs/XINSTA_CORE.md'
       - '.github/workflows/xinsta-core-build.yml'
   push:
     branches:
       - 'feature/xinsta-core'
     paths:
       - 'ios/XinstaCore/**'
+      - 'docs/XINSTA_CORE.md'
       - '.github/workflows/xinsta-core-build.yml'
   workflow_dispatch:
 
@@ -74,8 +76,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/XinstaCoreDerivedData" \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGN_IDENTITY="" \
-            -quiet
+            CODE_SIGN_IDENTITY=""
 
       - name: Verify artifact is an arm64 iOS Mach-O dylib
         run: |
