@@ -104,10 +104,10 @@ static void TestPersistenceHardening(void) {
                                                                    title:@"Duplicate"
                                                              description:@"Duplicate"
                                                         enabledByDefault:NO];
-    NSArray *withDuplicate = @[[XinstaFeature alloc] initWithIdentifier:@"info"
+    NSArray *withDuplicate = @[[[XinstaFeature alloc] initWithIdentifier:@"info"
                                                                  title:@"Info"
                                                            description:@"Info"
-                                                      enabledByDefault:YES],
+                                                      enabledByDefault:YES]],
                                duplicate];
     NSUserDefaults *duplicateDefaults = CleanDefaults();
     XinstaFeatureRegistry *duplicateRegistry = [[XinstaFeatureRegistry alloc] initWithFeatures:withDuplicate
@@ -171,8 +171,9 @@ static void TestCompatibility(void) {
         XinstaCompatibilityReasonBuildMismatch,
     ];
     for (NSUInteger i = 0; i < rejections.count; i += 1) {
-        Expect(![rejections[i] supported], @"unexpected host metadata is rejected");
-        Expect([rejections[i].reasonCode isEqualToString:expectedCodes[i]], @"rejection reason code is stable");
+        XinstaCompatibilityReport *rejection = rejections[i];
+        Expect(!rejection.supported, @"unexpected host metadata is rejected");
+        Expect([rejection.reasonCode isEqualToString:expectedCodes[i]], @"rejection reason code is stable");
     }
 
     XinstaCompatibilityReport *nilResolver = [XinstaCompatibility checkBundleIdentifier:@"com.burbn.instagram"
@@ -233,6 +234,7 @@ static void TestAdapter(void) {
 
     __block NSUInteger failedCalls = 0;
     XinstaSymbolAvailability onceFailing = ^BOOL(NSString *name) {
+        (void)name;
         failedCalls += 1;
         return NO;
     };
