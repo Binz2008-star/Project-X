@@ -7,9 +7,9 @@ NS_ASSUME_NONNULL_BEGIN
 /// real Instagram process.
 @interface XinstaHostMetadata : NSObject
 
-@property (nonatomic, copy, readonly, nullable NSString *)bundleIdentifier;
-@property (nonatomic, copy, readonly, nullable NSString *)version;
-@property (nonatomic, copy, readonly, nullable NSString *)build;
+@property (nonatomic, copy, readonly, nullable) NSString *bundleIdentifier;
+@property (nonatomic, copy, readonly, nullable) NSString *version;
+@property (nonatomic, copy, readonly, nullable) NSString *build;
 
 + (instancetype)metadataWithBundle:(NSBundle *)bundle;
 

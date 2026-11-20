@@ -4,7 +4,7 @@
 
 @interface XinstaIG456Adapter ()
 @property (nonatomic, strong) XinstaHostMetadata *hostMetadata;
-@property (nonatomic, copy, nullable XinstaSymbolAvailability) symbolAvailability;
+@property (nonatomic, copy, nullable) XinstaSymbolAvailability symbolAvailability;
 @property (nonatomic, strong) NSLock *stateLock;
 @end
 
@@ -48,7 +48,7 @@
 }
 
 - (instancetype)initWithHostMetadata:(XinstaHostMetadata *)hostMetadata
-                  symbolAvailability:(XinstaSymbolAvailability)symbolAvailability {
+                  symbolAvailability:(nullable XinstaSymbolAvailability)symbolAvailability {
     self = [super init];
     if (self) {
         _hostMetadata = hostMetadata;

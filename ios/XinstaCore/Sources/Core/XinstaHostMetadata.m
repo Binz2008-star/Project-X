@@ -8,9 +8,9 @@
                                             build:[bundle objectForInfoDictionaryKey:@"CFBundleVersion"]];
 }
 
-- (instancetype)initWithBundleIdentifier:(NSString *)bundleIdentifier
-                                 version:(NSString *)version
-                                   build:(NSString *)build {
+- (instancetype)initWithBundleIdentifier:(nullable NSString *)bundleIdentifier
+                                 version:(nullable NSString *)version
+                                   build:(nullable NSString *)build {
     self = [super init];
     if (self) {
         _bundleIdentifier = [bundleIdentifier copy];

@@ -22,7 +22,7 @@
     return self.features.count;
 }
 
-- (XinstaFeature *)featureAtIndex:(NSUInteger)index {
+- (nullable XinstaFeature *)featureAtIndex:(NSUInteger)index {
     if (index >= self.features.count) {
         return nil;
     }
@@ -41,7 +41,7 @@
     }
 }
 
-- (NSString *)statusTextForReport:(XinstaCompatibilityReport *)report {
+- (NSString *)statusTextForReport:(nullable XinstaCompatibilityReport *)report {
     if (!report) {
         return @"Adapter unavailable";
     }

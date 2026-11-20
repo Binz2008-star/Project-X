@@ -38,6 +38,21 @@ jobs:
       - name: Run Foundation-only Core tests
         run: bash ios/XinstaCore/Scripts/run-tests.sh
 
+      - name: Run iOS Simulator UIKit XCTests
+        run: |
+          set -euo pipefail
+          cd ios/XinstaCore
+          xcodebuild -list
+          xcodebuild test \
+            -scheme XinstaCore-Package \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath "$RUNNER_TEMP/XinstaCoreDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            -quiet
+
       - name: Verify artifact is an arm64 iOS Mach-O dylib
         run: |
           set -euo pipefail

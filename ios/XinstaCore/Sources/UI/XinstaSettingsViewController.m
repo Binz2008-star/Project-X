@@ -35,7 +35,7 @@ static NSString *const XinstaSettingsCellIdentifier = @"XinstaSettingsCell";
     return nil;
 }
 
-- (instancetype)initWithNibName:(NSString *)nibNameOrNil bundle:(NSBundle *)nibBundleOrNil {
+- (instancetype)initWithNibName:(nullable NSString *)nibNameOrNil bundle:(nullable NSBundle *)nibBundleOrNil {
     (void)nibNameOrNil;
     (void)nibBundleOrNil;
     [NSException raise:NSInvalidArgumentException

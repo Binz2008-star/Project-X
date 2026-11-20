@@ -57,10 +57,10 @@ NSString * const XinstaCompatibilityReasonSymbolsUnavailable = @"symbols_unavail
                                                 missingSymbols:@[]];
 }
 
-+ (XinstaCompatibilityReport *)checkBundleIdentifier:(NSString *)bundleIdentifier
-                                              version:(NSString *)version
-                                                build:(NSString *)build
-                                    symbolAvailability:(XinstaSymbolAvailability)availability {
++ (XinstaCompatibilityReport *)checkBundleIdentifier:(nullable NSString *)bundleIdentifier
+                                              version:(nullable NSString *)version
+                                                build:(nullable NSString *)build
+                                    symbolAvailability:(nullable XinstaSymbolAvailability)availability {
     if (bundleIdentifier.length == 0) {
         return [self rejectedWithReasonCode:XinstaCompatibilityReasonMissingBundleIdentifier
                                      reason:@"Host bundle identifier is missing"];
