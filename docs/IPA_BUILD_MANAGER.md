@@ -98,9 +98,10 @@ Exit codes: `0` preflight passed, `2` preflight rejected, `1` input unreadable o
 ## Outstanding risks and next milestone
 
 1. Independent Model 1 review of this increment (pending).
-2. An owner-owned, buildable iOS test application must exist before any real integration rehearsal. The fictional `demo.owned` identity is only a contract fixture.
-3. Signing identity, provisioning profile, registered UDID, and written device-authorization scope remain unavailable — all plan steps that need them stay `blocked`.
-4. No approved injection/implantation method or verified hook path exists; X Settings remains a standalone simulator-tested controller.
-5. Next executable milestone: extend this plan into a *local-only, owned-app* integration rehearsal that produces a reproducible artifact manifest and proves the plan’s stepped preconditions, still without signing or device installation.
+2. The analyzer that emits the report lives in the separate Draft PR #7 and is not imported here; integration is by the pinned `schema_version = "1.0"` contract and synthetic payloads only. An end-to-end test with real analyzer output is pending until the branches converge.
+3. An owner-owned, buildable iOS test application must exist before any real integration rehearsal. The fictional `demo.owned` identity is only a contract fixture.
+4. Signing identity, provisioning profile, registered UDID, and written device-authorization scope remain unavailable — all plan steps that need them stay `blocked`.
+5. No approved injection/implantation method or verified hook path exists; X Settings remains a standalone simulator-tested controller.
+6. Next executable milestone: extend this plan into a *local-only, owned-app* integration rehearsal that produces a reproducible artifact manifest and proves the plan’s stepped preconditions, still without signing or device installation.
 
 No merge, deployment, Neon change, signing, repackaging, or device work is authorized by this increment.

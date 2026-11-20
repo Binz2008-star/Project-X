@@ -277,6 +277,7 @@ def test_missing_main_executable_is_rejected() -> None:
         (lambda s: s.update(file_type="MH_DYLIB"), "MAIN_EXECUTABLE_FILE_TYPE"),
         (lambda s: s["encryption"].update(cryptid=1), "MAIN_EXECUTABLE_ENCRYPTED"),
         (lambda s: s.update(encryption=None), "MAIN_EXECUTABLE_ENCRYPTED"),
+        (lambda s: s["encryption"].update(cryptid=False), "MAIN_EXECUTABLE_ENCRYPTED"),
     ],
 )
 def test_unsafe_main_executable_slice_is_rejected(mutate, expected_code) -> None:

@@ -305,7 +305,8 @@ def _check_slices(slices: Any, findings: list[Finding]) -> None:
         if item.get("file_type") != "MH_EXECUTE":
             _add_once(seen, findings, "MAIN_EXECUTABLE_FILE_TYPE", _BLK, "slice is not MH_EXECUTE")
         encryption = item.get("encryption")
-        if not isinstance(encryption, dict) or encryption.get("cryptid") != 0:
+        cryptid = encryption.get("cryptid") if isinstance(encryption, dict) else None
+        if not isinstance(cryptid, int) or isinstance(cryptid, bool) or cryptid != 0:
             _add_once(
                 seen,
                 findings,
