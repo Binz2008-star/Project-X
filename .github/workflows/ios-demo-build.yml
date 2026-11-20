@@ -1,0 +1,59 @@
+name: iOS demo app — unsigned macOS build verification
+
+# Isolated from the licensing backend CI (ci.yml). This workflow only compiles
+# the owned SwiftUI sample; it does not touch the API, migrations or Neon.
+on:
+  push:
+    branches: [main, 'feature/**']
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-demo-build.yml'
+  pull_request:
+    branches: [main, 'feature/**']
+    paths:
+      - 'ios/**'
+      - '.github/workflows/ios-demo-build.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unsigned-build:
+    name: Compile owned demo app (no signing credentials)
+    runs-on: macos-14
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Xcode toolchain
+        run: xcodebuild -version
+
+      - name: Build unsigned iOS Simulator app
+        # No Apple ID, team, certificate, provisioning profile or secret is used.
+        # A simulator build proves compilation only; it cannot be installed on
+        # a physical iPhone.
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project ios/DemoApp/DemoApp.xcodeproj \
+            -scheme DemoApp \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "${{ runner.temp }}/DemoAppDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY= \
+            PROVISIONING_PROFILE_SPECIFIER= \
+            build
+
+      - name: Verify generated app and record hash
+        run: |
+          set -euo pipefail
+          APP="${{ runner.temp }}/DemoAppDerivedData/Build/Products/Debug-iphonesimulator/DemoApp.app"
+          test -d "$APP"
+          test -f "$APP/DemoApp"
+          file "$APP/DemoApp"
+          plutil -extract CFBundleIdentifier raw "$APP/Info.plist"
+          plutil -extract MinimumOSVersion raw "$APP/Info.plist"
+          shasum -a 256 "$APP/DemoApp"
