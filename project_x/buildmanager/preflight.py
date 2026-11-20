@@ -31,6 +31,61 @@ MINIMUM_IOS_TEXT = "16.3"
 # third-party bundle identifier can pass this gate regardless of manifest text.
 ALLOWED_BUNDLE_IDS = frozenset({"demo.owned"})
 ALLOWED_RIGHTS_BASIS = frozenset({"owned-test-package"})
+ALLOWED_ARCHITECTURES = frozenset({"arm64", "arm64e"})
+
+# Finding codes emitted by the schema 1.0 read-only analyzer. Only these fixed
+# literals may be copied into a preflight result; anything else is untrusted
+# input and must never reach output (it could contain a path or a secret).
+KNOWN_ANALYSIS_CODES = frozenset(
+    {
+        "ABSOLUTE_ENTRY_PATH",
+        "ARCHIVE_TOO_LARGE",
+        "BACKSLASH_ENTRY_PATH",
+        "COMPRESSION_RATIO_ABNORMAL",
+        "CORRUPT_ENTRY",
+        "DUPLICATE_ENTRY_NAME",
+        "EMPTY_ARCHIVE",
+        "EMPTY_ENTRY_NAME",
+        "ENCRYPTED_ENTRY",
+        "ENTRY_READ_TOO_LARGE",
+        "ENTRY_TOO_LARGE",
+        "EXECUTABLE_NOT_PRESENT",
+        "FAIRPLAY_METADATA_PRESENT",
+        "FRAMEWORK_NAME_COLLISION",
+        "MAIN_BINARY_DECRYPTED",
+        "MAIN_BINARY_ENCRYPTED",
+        "MAIN_BINARY_UNPARSEABLE",
+        "MALFORMED_CENTRAL_DIRECTORY",
+        "MH_BUNDLE",
+        "MH_CORE",
+        "MH_DYLIB",
+        "MH_DYLIB_STUB",
+        "MH_DYLINKER",
+        "MH_EXECUTE",
+        "MH_FVMLIB",
+        "MH_KEXT_BUNDLE",
+        "MH_OBJECT",
+        "MH_PRELOAD",
+        "MIN_OS_MISMATCH",
+        "MISSING_BUNDLE_ID",
+        "MISSING_EXECUTABLE_NAME",
+        "NO_CODE_SIGNATURE",
+        "NO_EMBEDDED_EXTENSIONS",
+        "NON_ARM64_ARCHITECTURE",
+        "NOT_A_ZIP",
+        "NUL_IN_ENTRY_NAME",
+        "PATH_TRAVERSAL",
+        "PROTECTED_FRAMEWORK_BASENAMES",
+        "PROVISIONING_PROFILE_PRESENT",
+        "SYMLINK_ENTRY",
+        "TOO_MANY_ENTRIES",
+        "UNEXPECTED_EXTENSION_IDENTIFIER",
+        "UNREADABLE_ARCHIVE",
+        "UNRESOLVED_RPATH_DEPENDENCY",
+        "UNSIGNED_NESTED_BUNDLE",
+        "UNSUPPORTED_COMPRESSION",
+    }
+)
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _AUTHORIZATION_ID_RE = re.compile(r"^[A-Z0-9][A-Z0-9._-]{2,63}$")
@@ -86,10 +141,13 @@ class AuthorizationManifest:
             raise PreflightInputError("manifest.schema_version must be '1.0'")
         keys = frozenset(data)
         if keys != _MANIFEST_KEYS:
-            missing = sorted(_MANIFEST_KEYS - keys)
-            unknown = sorted(keys - _MANIFEST_KEYS)
+            missing_count = len(_MANIFEST_KEYS - keys)
+            unknown_count = len(keys - _MANIFEST_KEYS)
+            # Never echo unknown key names: they are attacker-controlled and
+            # could contain a path, a secret, or control characters.
             raise PreflightInputError(
-                f"manifest keys must be exact (missing={missing}, unknown={unknown})"
+                f"manifest keys must be exact (missing_count={missing_count}, "
+                f"unknown_count={unknown_count})"
             )
         if data["owner_authorized"] is not True:
             raise PreflightInputError("manifest.owner_authorized must be boolean true")
@@ -199,7 +257,16 @@ def evaluate(manifest: Any, report: Any) -> PreflightResult:
 
     if not isinstance(identity["executable"], str) or not identity["executable"]:
         findings.append(Finding("MAIN_EXECUTABLE_MISSING", _BLK, "no main executable recorded"))
-    _check_slices(report["macho"]["slices"], findings)
+    slices = report["macho"]["slices"]
+    if report["macho"]["slice_count"] != len(slices):
+        findings.append(
+            Finding(
+                "MACHO_SLICE_COUNT_MISMATCH",
+                _BLK,
+                "declared slice count differs from recorded slices",
+            )
+        )
+    _check_slices(slices, findings)
 
     analysis_findings = report["findings"]
     warning_codes = sorted({f["code"] for f in analysis_findings if f["severity"] == _WARN})
@@ -292,13 +359,13 @@ def _check_slices(slices: Any, findings: list[Finding]) -> None:
         if not isinstance(item, dict):
             _add_once(seen, findings, "MAIN_EXECUTABLE_SLICE_INVALID", _BLK, "malformed Mach-O slice")
             continue
-        if item.get("arch") != "arm64":
+        if item.get("arch") not in ALLOWED_ARCHITECTURES:
             _add_once(
                 seen,
                 findings,
                 "MAIN_EXECUTABLE_ARCHITECTURE",
                 _BLK,
-                "only arm64 main executables are supported",
+                "only arm64-family main executables are supported",
             )
         if item.get("is_64_bit") is not True:
             _add_once(seen, findings, "MAIN_EXECUTABLE_NOT_64_BIT", _BLK, "slice is not 64-bit")
@@ -338,24 +405,27 @@ def _validate_report(report: Any) -> None:
             raise PreflightInputError(f"report.identity.{key} must be a string or null")
 
     artifact = _mapping(data.get("artifact"), "report.artifact")
-    if not isinstance(artifact.get("sha256"), str):
-        raise PreflightInputError("report.artifact.sha256 must be a string")
+    if not isinstance(artifact.get("sha256"), str) or not _SHA256_RE.match(artifact["sha256"]):
+        raise PreflightInputError("report.artifact.sha256 must be 64 lower-case hex characters")
 
     macho = _mapping(data.get("macho"), "report.macho")
     if "slices" not in macho:
         raise PreflightInputError("report.macho.slices is required")
+    if "slice_count" not in macho:
+        raise PreflightInputError("report.macho.slice_count is required")
+    if not isinstance(macho["slice_count"], int) or isinstance(macho["slice_count"], bool):
+        raise PreflightInputError("report.macho.slice_count must be an integer")
 
     analysis = data.get("findings")
     if not isinstance(analysis, list):
         raise PreflightInputError("report.findings must be a list")
     for item in analysis:
         entry = _mapping(item, "report.findings[]")
-        if not isinstance(entry.get("code"), str) or entry.get("severity") not in {
-            "critical",
-            "warning",
-            "info",
-        }:
-            raise PreflightInputError("report.findings[] has an invalid code or severity")
+        code = entry.get("code")
+        if not isinstance(code, str) or code not in KNOWN_ANALYSIS_CODES:
+            raise PreflightInputError("report.findings[] has an unknown finding code")
+        if entry.get("severity") not in {"critical", "warning", "info"}:
+            raise PreflightInputError("report.findings[] has an invalid severity")
 
     signing = _mapping(data.get("signing"), "report.signing")
     _mapping(signing.get("verification"), "report.signing.verification")

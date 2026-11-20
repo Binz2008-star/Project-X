@@ -15,7 +15,7 @@ The tool consumes JSON only. It never opens an IPA, never extracts, writes, sign
 | `project_x/buildmanager/__init__.py` | Public exports for the preflight API. |
 | `project_x/buildmanager/preflight.py` | Manifest parsing, fail-closed policy checks, deterministic plan builder. |
 | `scripts/build_manager_preflight.py` | CLI; prints one JSON document to stdout and exits 0/1/2. |
-| `tests/test_build_manager_preflight.py` | 41 synthetic-payload tests; no third-party IPA or credential needed. |
+| `tests/test_build_manager_preflight.py` | 51 synthetic-payload tests; no third-party IPA or credential needed. |
 | `.github/workflows/ci.yml` | Adds the preflight test step to the existing isolated CI job. |
 | `docs/IPA_BUILD_MANAGER.md` | This document. |
 
@@ -42,23 +42,26 @@ Keys must match exactly. `owner_authorized` must be boolean `true`; wildcard cha
 
 ### Inspection report
 
-The report is the versioned `IpaInspectionReport` (`schema_version = "1.0"`) defined by the read-only analysis engine. Only these fields are consumed: `artifact.sha256`, `identity.{bundle_id,version,build_number,minimum_os,executable}`, `macho.slices[]`, `signing.verification`, `dependencies.{unresolved_rpath_dependencies,duplicate_framework_basenames}`, `findings[].{code,severity}`, and `interpretation.malware_verdict`. Everything else is ignored so that provisioning-profile details, local names, and other private metadata cannot leak into the plan.
+The report is the versioned `IpaInspectionReport` (`schema_version = "1.0"`) defined by the read-only analysis engine. Only these fields are consumed: `artifact.sha256`, `identity.{bundle_id,version,build_number,minimum_os,executable}`, `macho.{slice_count,slices[]}`, `signing.verification`, `dependencies.{unresolved_rpath_dependencies,duplicate_framework_basenames}`, `findings[].{code,severity}`, and `interpretation.malware_verdict`. Everything else is ignored so that provisioning-profile details, local names, and other private metadata cannot leak into the plan.
+
+Report hash format is validated identically to the manifest. Finding codes must come from the fixed `KNOWN_ANALYSIS_CODES` allowlist; arbitrary strings are rejected before any result is built. This prevents a crafted code containing a path, secret, or control character from being echoed into `review_findings` or a blocker detail. The allowlist must be updated deliberately when the analyzer contract changes, which is fail-closed by design.
 
 ## Fail-closed rules
 
 | Check | Rejection code |
 | --- | --- |
 | Manifest shape, schema, boolean authorization, exact ID/hash/identity | `MANIFEST_INVALID` |
-| Report shape or unsupported schema | `REPORT_INVALID` |
+| Report shape, unsupported schema, unknown finding code, malformed hash | `REPORT_INVALID` |
 | Any bundle other than an owned test package | `BUNDLE_ID_NOT_ALLOWED` |
 | Identity or hash differs from the manifest | `BUNDLE_ID_MISMATCH`, `VERSION_MISMATCH`, `BUILD_MISMATCH`, `SHA256_MISMATCH` |
 | Deployment target below iOS 16.3 | `MINIMUM_OS_TOO_LOW` |
-| Missing/invalid main executable or non-arm64/encrypted slice | `MAIN_EXECUTABLE_*` |
-| Critical structural finding from the analyzer | `CRITICAL_ANALYSIS_FINDING` |
+| Missing/invalid main executable, non-arm64-family, or encrypted slice | `MAIN_EXECUTABLE_*` |
+| Declared slice count differs from recorded slices | `MACHO_SLICE_COUNT_MISMATCH` |
+| Critical structural finding from the analyzer (code from allowlist only) | `CRITICAL_ANALYSIS_FINDING` |
 | Report claims signature verification or a malware verdict | `SIGNING_VERIFICATION_CLAIM`, `MALWARE_VERDICT_CLAIM` |
 | Unresolved `@rpath` dependency | `UNRESOLVED_RPATH_DEPENDENCY` |
 
-Warnings and duplicate framework basenames are retained as `review_findings`; they do not silently disappear. Multiple blockers are reported together rather than stopping at the first one.
+Warnings and duplicate framework basenames are retained as `review_findings`; only allowlisted analyzer codes are copied. Unknown manifest key names are reduced to counts, never echoed. Multiple blockers are reported together rather than stopping at the first one.
 
 The allowlist currently contains only `demo.owned`, the fictional/owned test product used throughout this repository. Third-party bundle identifiers such as `com.burbn.instagram` are rejected unconditionally: `docs/RIGHTS_REGISTER.md` records that commercial rights are not established, and the owner has not supplied a written authorization artifact to this tool.
 
@@ -81,13 +84,26 @@ The output is byte-stable for identical inputs: no timestamps, no absolute paths
 .\.venv\Scripts\python.exe -m scripts.build_manager_preflight --manifest manifest.json --report report.json
 ```
 
-Exit codes: `0` preflight passed, `2` preflight rejected, `1` input unreadable or malformed JSON. On input errors the CLI prints only an error kind; it does not echo private paths or decoder details. Windows syntax uses `--basetemp` because the default pytest temp root can be ACL-restricted; CI on Linux needs no override.
+Exit codes: `0` preflight passed, `2` preflight rejected, `1` unreadable input, malformed JSON, or invalid arguments — including unknown flags and missing required flags. Argument errors print only `{"error": "invalid_arguments"}`; file/JSON errors print only an error kind. No private path, argument text, or decoder detail is echoed. Windows syntax uses `--basetemp` because the default pytest temp root can be ACL-restricted; CI on Linux needs no override.
 
 ## Verification
 
-- Local: `41 passed` for `tests/test_build_manager_preflight.py` on Python 3.14.7 (2026-11-21). Combined run with the API suites: `71 passed, 29 skipped`. Legacy licensing `OK (7 tests)`; `OpenAPI schema matches implementation`; `git diff --check` clean.
-- CI final head `d600c2039aadc7e56194ea4618f8c74d0cfca029`: push run `44835102952` **SUCCESS** — `41 passed` preflight, `58 passed` API, `2 passed` staging guard, `Ran 7 tests` licensing, both Alembic checks `No new upgrade operations detected.`, `OpenAPI schema matches implementation`. PR-level run `44835108953` **SUCCESS** on the same head with the same counts.
-- Earlier commit `fe31227` runs `44834952866` (push) and `44834992322` (PR) also succeeded; they are superseded by the final-head runs above.
+- Local after the review fixes: `51 passed` for `tests/test_build_manager_preflight.py` on Python 3.14.7 (2026-11-21). Earlier full local suite before those fixes: `71 passed, 29 skipped` combined; legacy licensing `OK (7 tests)`; `OpenAPI schema matches implementation`; `git diff --check` clean.
+- CI on code head `d600c2039aadc7e56194ea4618f8c74d0cfca029`: push run `44835102952` **SUCCESS** and PR run `44835108953` **SUCCESS** — `41 passed` preflight, `58 passed` API, `2 passed` staging guard, `Ran 7 tests` licensing, both Alembic checks clean, OpenAPI in sync.
+- CI on documentation-only head `f5787c975e2516f0f975b720e16be1a9fdc4f4cd`: push run `44835319318` **SUCCESS** and PR run `44835326639` **SUCCESS** with the same counts.
+- The review-fix commit changes code and must be verified by fresh runs; record those IDs here before requesting final re-review. Earlier commit `fe31227` runs `44834952866` / `44834992322` are superseded.
+
+## Independent review closure (first pass)
+
+The first independent review returned `REQUEST CHANGES` with two Medium findings and one Low finding. All are addressed:
+
+| Finding | Status | Fix | Evidence |
+| --- | --- | --- | --- |
+| Unvalidated report/manifest strings copied into output | FIXED | `KNOWN_ANALYSIS_CODES` allowlist in `preflight.py`; unknown finding codes rejected; unknown manifest keys reduced to counts; strict report hash format; slice-count cross-check; arm64e accepted explicitly | New tests for secret/path-like finding codes, secret manifest key names, hash format, and slice-count mismatch |
+| CLI argument parsing bypassed the documented exit code and echoed paths | FIXED | `SafeArgumentParser.error()` raises `InvalidArguments`; CLI returns 1 with a generic JSON error for unknown/missing arguments | New CLI tests for extra and missing arguments containing private paths |
+| Verification section referenced a stale head | FIXED | This section now distinguishes code head from documentation-only head and requires fresh IDs for the review-fix commit | This document |
+
+No merge or deployment is implied by this closure; independent re-review is still required.
 
 ## Security and compatibility considerations
 
@@ -98,7 +114,7 @@ Exit codes: `0` preflight passed, `2` preflight rejected, `1` input unreadable o
 
 ## Outstanding risks and next milestone
 
-1. Independent Model 1 review of this increment (pending).
+1. Independent re-review after the review-fix commit and fresh CI (pending). The first pass returned `REQUEST CHANGES`; all three findings are addressed above.
 2. The analyzer that emits the report lives in the separate Draft PR #7 and is not imported here; integration is by the pinned `schema_version = "1.0"` contract and synthetic payloads only. An end-to-end test with real analyzer output is pending until the branches converge.
 3. An owner-owned, buildable iOS test application must exist before any real integration rehearsal. The fictional `demo.owned` identity is only a contract fixture.
 4. Signing identity, provisioning profile, registered UDID, and written device-authorization scope remain unavailable — all plan steps that need them stay `blocked`.

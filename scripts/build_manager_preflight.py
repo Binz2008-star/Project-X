@@ -22,11 +22,26 @@ from typing import Sequence
 from project_x.buildmanager import evaluate
 
 
+class InvalidArguments(Exception):
+    """An argument error that must not echo user-controlled argument text."""
+
+
+class SafeArgumentParser(argparse.ArgumentParser):
+    """Argument parser that never prints raw arguments or private paths."""
+
+    def error(self, message: str) -> None:
+        raise InvalidArguments(message)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = SafeArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, type=Path, help="owner authorization JSON")
     parser.add_argument("--report", required=True, type=Path, help="IPA inspection report JSON")
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except InvalidArguments:
+        print(json.dumps({"error": "invalid_arguments"}))
+        return 1
 
     try:
         manifest_payload = json.loads(args.manifest.read_text(encoding="utf-8"))

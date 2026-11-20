@@ -368,3 +368,62 @@ def test_inputs_are_not_mutated() -> None:
     evaluate(manifest, report)
     assert manifest == manifest_before
     assert report == report_before
+
+
+def test_unknown_analysis_code_cannot_leak_into_output() -> None:
+    secret_code = "C:\\Users\\owner\\private-family-photos\\SECRET\\nSECOND LINE"
+    for severity in ("warning", "critical"):
+        report = inspection_report()
+        report["findings"] = [{"code": secret_code, "severity": severity, "detail": "x"}]
+        result = evaluate(authorization_manifest(), report)
+        assert result.preflight_passed is False
+        assert "REPORT_INVALID" in codes(result)
+        assert secret_code not in json.dumps(result.to_dict())
+
+
+def test_unknown_manifest_key_name_cannot_leak_into_output() -> None:
+    manifest = authorization_manifest()
+    manifest["SUPER_SECRET_PROFILE_NAME"] = "value"
+    result = evaluate(manifest, inspection_report())
+    assert "MANIFEST_INVALID" in codes(result)
+    output = json.dumps(result.to_dict())
+    assert "SUPER_SECRET_PROFILE_NAME" not in output
+    assert "value" not in output
+
+
+def test_cli_rejects_extra_arguments_without_echoing_paths(capsys) -> None:
+    private = "--extra C:\\Users\\owner\\private-family-photos\\secret.json"
+    assert main(private.split()) == 1
+    captured = capsys.readouterr()
+    assert "private-family-photos" not in captured.out + captured.err
+    assert json.loads(captured.out) == {"error": "invalid_arguments"}
+
+
+def test_cli_rejects_missing_arguments_without_echoing_paths(capsys) -> None:
+    private = "--report C:\\Users\\owner\\private-family-photos\\missing-report.json"
+    assert main(private.split()) == 1
+    captured = capsys.readouterr()
+    assert "private-family-photos" not in captured.out + captured.err
+    assert json.loads(captured.out) == {"error": "invalid_arguments"}
+
+
+def test_arm64e_slice_is_accepted() -> None:
+    report = inspection_report()
+    report["macho"]["slices"][0]["arch"] = "arm64e"
+    result = evaluate(authorization_manifest(), report)
+    assert result.preflight_passed is True
+
+
+def test_slice_count_mismatch_is_rejected() -> None:
+    report = inspection_report()
+    report["macho"]["slice_count"] = 2
+    result = evaluate(authorization_manifest(), report)
+    assert "MACHO_SLICE_COUNT_MISMATCH" in codes(result)
+
+
+@pytest.mark.parametrize("value", ["A" * 64, "short", None, "b" * 63])
+def test_report_hash_uses_the_same_strict_format(value) -> None:
+    report = inspection_report()
+    report["artifact"]["sha256"] = value
+    result = evaluate(authorization_manifest(), report)
+    assert "REPORT_INVALID" in codes(result)
