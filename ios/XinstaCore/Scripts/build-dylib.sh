@@ -26,6 +26,7 @@ SOURCES=(
   -target arm64-apple-ios"$MIN_OS" \
   -isysroot "$SDK" \
   -fobjc-arc -fmodules \
+  -I "$ROOT/Sources/Core" -I "$ROOT/Sources/Adapter" -I "$ROOT/Sources/UI" \
   -O2 -Wall -Wextra -Werror \
   -dynamiclib \
   -install_name @rpath/libXinstaCore.dylib \
