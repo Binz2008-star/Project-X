@@ -1,6 +1,6 @@
 # iOS demo app — owned, unsigned build verification
 
-Status: **sources and isolated macOS workflow added; compilation evidence is recorded below after the first CI run.** This is a demonstration application owned by Project X. It is not derived from, repackaged from, or compatible with any third-party IPA.
+Status: **unsigned compilation verified on GitHub Actions.** This is a demonstration application owned by Project X. It is not derived from, repackaged from, or compatible with any third-party IPA. Runtime behaviour on a simulator or physical device has not been tested.
 
 ## 1. What this proves and what it does not
 
@@ -66,15 +66,20 @@ xcodebuild \
 
 ## 4. Compilation evidence
 
-Recorded after the first successful workflow run on `feature/ios-demo-app`:
+Recorded from GitHub Actions run [`44808594836`](https://github.com/Binz2008-star/Project-X/actions/runs/44808594836) on `feature/ios-demo-app` at 2026-11-20T20:08Z:
 
-- Workflow run: _pending first CI run_
-- Xcode version: _pending_
-- Verified bundle identifier: _pending_
-- Verified `MinimumOSVersion`: _pending_
-- SHA-256 of `DemoApp.app/DemoApp`: _pending_
+- Workflow: `iOS demo app — unsigned macOS build verification`
+- Runner: `macos-15`
+- Xcode: **16.4** (`xcodebuild -version`)
+- Build command: `xcodebuild -project ios/DemoApp/DemoApp.xcodeproj -scheme DemoApp -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath … CODE_SIGNING_ALLOWED=NO CODE_SIGN_IDENTITY= PROVISIONING_PROFILE_SPECIFIER= build`
+- Result: **BUILD SUCCEEDED** (log line: `** BUILD SUCCEEDED **`).
+- Generated binary: `DemoApp.app/DemoApp`, `Mach-O 64-bit executable arm64`
+- Verified `CFBundleIdentifier`: **com.projectx.demo**
+- Verified `MinimumOSVersion`: **16.0**
+- SHA-256 of `DemoApp.app/DemoApp`: **b9e07752c246dffbe76708ce59311d13a573c78f744e14a5825276774da551d8**
+- Build log: one informational tool warning, `Metadata extraction skipped. No AppIntents.framework dependency found.` No compiler error or Swift warning was recorded.
 
-These fields are updated only with output from an actual successful run. Until then, no claim of successful compilation is made.
+This proves compilation only. The workflow did not launch a simulator or install the app on a device. An earlier run using the retired `macos-14` label was cancelled before any step ran; the workflow now uses the supported `macos-15` label.
 
 ## 5. Exact requirements for a future physical-iPhone test
 
