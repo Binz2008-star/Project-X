@@ -275,5 +275,5 @@ allowlist only; `execution_permitted` remains `false`.
 5. Any future hook, X Settings host proof, or feature exercise requires a new,
    explicit written scope and a separately reviewed verified target method.
    Those steps remain `NOT TESTED` here.
-8. Only after all of the above and owner approval may a merge or any wider
+6. Only after all of the above and owner approval may a merge or any wider
    distribution be considered.

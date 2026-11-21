@@ -87,6 +87,8 @@ A passing result has `preflight_passed = true` and a plan with:
 - Ordered steps marked `passed`, `planned`, or `blocked`. The declaration check is `check_owner_declaration` (not a verification step). Staging the dylib and adding a loader rpath are *planned* and require a separate installer review; codesigning, device registration/install, in-host load-marker collection for the pinned proof, and in-host X Settings verification are *blocked* pending credentials, verified authorization and an approved hook path.
 - Credential names listed as `provided = false`, `secret = true`. No credential value, local path, or provisioning-profile metadata appears in the output.
 
+Plan schema remains `1.0`; the load-only change is additive. Existing consumers must ignore the new `purpose` field and the extra blocked step, and no previously emitted field was removed or retyped. If a strict external JSON-schema consumer exists, validate this additive shape before rollout.
+
 The output is byte-stable for identical inputs: no timestamps, no absolute paths, and no unordered sets in emitted lists.
 
 ## Verified authorization gate (separate from preflight)
@@ -123,7 +125,21 @@ legacy licensing `OK (7 tests)`; OpenAPI synchronization passed; `git diff
 --check` clean. GitHub Actions run `44856252376` passed on that head with
 `58` API tests, `2` staging guards, `87` analyzer tests, `166` preflight and
 authorization tests, `18` contract tests, `Ran 7 tests` for licensing, clean
-Alembic checks, and synchronized OpenAPI. No runtime load evidence is claimed.
+Alembic checks, and synchronized OpenAPI. The documentation-only follow-up head
+`114b3b3ac524957982f202b5e580199ba9038cc5` passed CI run `44856414354` with
+the same counts. No runtime load evidence is claimed.
+
+### Independent load-policy review
+
+A fresh read-only review of head `114b3b3ac524957982f202b5e580199ba9038cc5`
+returned `APPROVE WITH NON-BLOCKING NOTES`: no blocking findings and no claim
+that runtime loading, hooking, host UI presentation, device verification, a
+merge, or commercial clearance was achieved. The notes were an additive plan
+schema without an explicit compatibility statement, an unrecorded docs-only CI
+head, a destructive runbook step relying on a safe `WORK_DIR`, and a numbering
+nit. This head documents the additive schema, records the docs-only CI run,
+adds a `WORK_DIR` guard, and fixes the numbering. The approval is review
+evidence, not merge authorization.
 
 B9 correction and re-review set: `159 passed` for `tests/test_build_manager_preflight.py` together with `tests/test_build_manager_authorization.py` using the repository virtualenv on 2026-11-21; combined API/staging run `31 passed, 29 skipped`; `git diff --check` clean. CI on the earlier B9 head passed push run `44841872361` and PR run `44841879766`. The later re-review corrections and their final-head CI runs are recorded in the PR body.
 

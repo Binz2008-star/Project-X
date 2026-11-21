@@ -53,6 +53,16 @@ All commands below are run on that macOS host, not by the repository code.
 ```bash
 set -euo pipefail
 umask 077
+test -n "${WORK_DIR:-}" && test -n "${EVIDENCE_DIR:-}"
+case "$WORK_DIR" in
+  /*) ;;
+  *) echo "WORK_DIR must be absolute" >&2; exit 1 ;;
+esac
+case "$WORK_DIR" in
+  "$HOME"|"$HOME"/*) ;;
+  *) echo "WORK_DIR must be under the operator home directory" >&2; exit 1 ;;
+esac
+test "$WORK_DIR" != "$HOME"
 mkdir -p "$WORK_DIR" "$EVIDENCE_DIR"
 chmod 700 "$WORK_DIR" "$EVIDENCE_DIR"
 git -C "$REPO" status --short > "$EVIDENCE_DIR/source-status.txt"
