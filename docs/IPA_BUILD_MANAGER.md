@@ -177,17 +177,19 @@ four execution steps blocked.
 pinned inputs. It requires a non-secret rights reference before changing the
 source, rechecks both pinned hashes, rejects output/input path collisions, copies
 entries into a new archive, rewrites app/extension/entitlement identities, stages
-the reviewed Core dylib, appends one `LC_LOAD_DYLIB` with fail-closed file-offset
-relocation, re-analyzes the output, and deletes an output that fails verification.
+the reviewed Core dylib, appends one `LC_LOAD_DYLIB` into verified zero padding
+with no file-offset relocation (insufficient, non-zero or colliding padding fails
+closed), re-analyzes the output, and deletes an output that fails verification.
 The source file is never opened for writing. The result is explicitly marked
 `signed=false` and `invalidated_requires_resign`; no nested signing, final signed
 package, Sideloadly integration, installer, or device action is included.
 
 `tests/test_pilot_package_build.py` covers the unsigned build output, source
-integrity, rights-reference rejection, path-safe CLI errors, Mach-O header-segment
-mapping, modern linkedit offsets, fileset rejection, and the raw SHA-256 helper.
+integrity, rights-reference rejection, path-safe CLI errors, Mach-O
+zero-relocation append, insufficient/non-zero padding and file-offset collision
+rejection, unknown-command and fileset rejection, and the raw SHA-256 helper.
 On the current local worktree the focused builder/planner suite passed
-`21 passed`; the full suite passed `366 passed, 30 skipped`; legacy licensing
+`24 passed`; the full suite passed `370 passed, 29 skipped`; legacy licensing
 passed `OK (7 tests)`; OpenAPI synchronization and `git diff --check` passed.
 These are local results only; CI for the new code is pending. The third-party
 rights and signing blockers remain unchanged, so no installable `Xinsta.ipa` has

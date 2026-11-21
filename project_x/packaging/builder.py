@@ -316,6 +316,9 @@ def _build_unsigned_pilot_ipa(
                         payload = extension_paths[name]
                     elif name in entitlement_paths:
                         payload = entitlement_paths[name]
+                    elif entry_info.is_dir():
+                        output_zip.writestr(entry_info, b"")
+                        continue
                     else:
                         with source_zip.open(entry_info) as reader, output_zip.open(
                             entry_info, "w"
@@ -324,8 +327,6 @@ def _build_unsigned_pilot_ipa(
                         continue
                     output_zip.writestr(entry_info, payload)
                 output_zip.writestr(dylib_path_in_app, dylib_bytes, zipfile.ZIP_DEFLATED)
-            if output.exists():
-                output.unlink()
             temporary.replace(output)
         finally:
             if temporary.exists():

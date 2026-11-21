@@ -247,8 +247,10 @@ Current status: steps 1–3 are `VERIFIED`/`BLOCKED` as noted above; steps 4–7
 ## Build execution gate — 21 November 2026
 
 The requested move from planning to a real `Xinsta.ipa` was attempted only as far
-as authorized read-only verification. **No installable IPA was produced**, no
-output path or hash exists, and no host software was installed.
+as authorized read-only verification plus the bounded unsigned executor. **No
+installable or signed IPA was produced**, no host software was installed, and no
+device was touched. An unsigned pilot IPA does now exist on the owner host
+outside the repository; it is not signed, not installed, and not runtime-tested.
 
 | Area | Finding |
 | --- | --- |
@@ -256,13 +258,13 @@ output path or hash exists, and no host software was installed.
 | Source IPA | `VERIFIED`: pinned hash `665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131`, `com.burbn.instagram`, `456.0.0` (`1114925422`), min iOS 16.3, arm64, encrypted `0`, 8 extensions, 8 URL schemes, 6 frameworks, 9 resource bundles |
 | Core artifact | `VERIFIED`: unsigned arm64 iOS 16.3 dylib hash `bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff`, install name `@rpath/libXinstaCore.dylib`, system-only dependencies |
 | Pilot identity | `VERIFIED`: `com.projectx.xinsta.pilot`, display name `Xinsta`, adapter `com.projectx.xinsta.pilot@456.0.0@1114925422`, pilot URL scheme and extension/App Group prefixes pinned |
-| Build implementation | `PARTIAL`: `project_x/packaging/builder.py` and `macho_patch.py` implement bounded unsigned copy/identity rewrite/dylib staging/load-command insertion with source-integrity and fail-closed checks. Nested re-signing, final signed packaging, Sideloadly integration, and device execution remain absent |
-| Test coverage | `VERIFIED`: 21 builder/planner tests cover unsigned output, source integrity, rights-reference rejection, path-safe CLI errors, Mach-O offset relocation, fileset rejection, and the dry-run planner. Local full suite `366 passed, 30 skipped`; legacy licensing `OK (7 tests)`; OpenAPI synchronized |
+| Build implementation | `PARTIAL`: `project_x/packaging/builder.py` and `macho_patch.py` implement bounded unsigned copy/identity rewrite/dylib staging/load-command insertion with source-integrity and fail-closed checks. The load command is appended into verified zero padding with **no file-offset relocation**; insufficient, non-zero or colliding padding fails closed. Nested re-signing, final signed packaging, Sideloadly integration, and device execution remain absent |
+| Test coverage | `VERIFIED`: 24 builder/planner tests cover unsigned output, source integrity, rights-reference rejection, path-safe CLI errors, Mach-O zero-relocation append, insufficient/non-zero padding and file-offset collision rejection, fileset and unknown-command rejection, and the dry-run planner. Local full suite `370 passed, 29 skipped`; legacy licensing `OK (7 tests)`; OpenAPI synchronized |
 | Core runtime behavior | `VERIFIED`: a constructor emits `[XinstaCore] init=...`, evaluates the compatibility gate, builds a feature registry, and can construct X Settings UI objects. No swizzling, method replacement, hooking, or host-class modification is implemented. Device load remains `NOT TESTED` |
 | Rights | `BLOCKED`: `AGENTS.md` forbids unlicensed Instagram IPA modification; `docs/RIGHTS_REGISTER.md` records only a scoped private load-only proof and no original-app modification right. Chat approval for a personal test is not a license from the rights holder |
 | Windows/Sideloadly | `BLOCKED`: Sideloadly absent; `winget` absent; AMD64 host; web iTunes `12.13.10.3` and Apple Mobile Device Service present; no Microsoft Store iTunes/iCloud packages found; no device, cert, profile, or signing tools present |
 | Device | `BLOCKED`: iTunes device count `0`; no Apple USB device; iOS version, pairing, trust, and Developer Mode `NOT TESTED` |
-| Artifact status | `BLOCKED`: no `Xinsta.ipa` output path, no final IPA hash, no signature verification, no installation, no runtime result |
+| Artifact status | `PARTIAL`: an **unsigned** pilot IPA was produced on the owner host outside the repository from the pinned source and reviewed dylib; output SHA-256 `5658150f4aab257b5af36ec9f1fcad2c55ed6a823fdf3e7c97dbc497b262b5f4`, distinct from the source hash, `signed=false`, `signature_status=invalidated_requires_resign`. The patched main executable differs from the source in only the mach-header `ncmds`/`sizeofcmds` fields and one appended `LC_LOAD_DYLIB` inside former zero padding; `LC_MAIN` entry offset and all file offsets are unchanged. No signature verification, installation, or runtime result exists |
 
 ### Exact remaining blockers
 

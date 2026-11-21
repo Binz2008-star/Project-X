@@ -48,6 +48,7 @@ def _source_info() -> dict:
 
 def _source_ipa(tmp_path):
     main_executable = build_macho(rpaths=("@executable_path/Frameworks",))
+    main_executable += b"\x00" * 0x1000
     entries = base_entries(executable=main_executable, info=_source_info())
     extension = APP + "PlugIns/Share.appex/"
     entries[extension + "Info.plist"] = plistlib.dumps(
@@ -62,6 +63,7 @@ def _source_ipa(tmp_path):
         },
         fmt=plistlib.FMT_BINARY,
     )
+    entries[APP + "PlugIns/"] = b""
     entries[extension + "Share"] = build_macho()
     entries[APP + "embedded.mobileprovision"] = plistlib.dumps(
         {
@@ -130,6 +132,7 @@ def test_build_creates_distinct_unsigned_pilot_ipa(tmp_path, monkeypatch) -> Non
     assert any(ref.name == "@rpath/libXinstaCore.dylib" for ref in report.macho_slices[0].dylibs)
 
     with zipfile.ZipFile(output) as archive:
+        assert APP + "PlugIns/" in archive.namelist()
         assert APP + "Frameworks/libXinstaCore.dylib" in archive.namelist()
         profile = plistlib.loads(archive.read(APP + "embedded.mobileprovision"))
         entitlements = profile["Entitlements"]
@@ -167,28 +170,28 @@ def test_build_rejects_unsafe_rights_reference(tmp_path, reference) -> None:
     assert caught.value.code in {"RIGHTS_REFERENCE_REQUIRED", "RIGHTS_REFERENCE_INVALID"}
 
 
-def test_add_load_dylib_relocates_file_offsets() -> None:
-    segment_size = 72 + 80
+def _seg_text64(section_offset: int) -> bytes:
     segment = struct.pack(
         "<II16sQQQQiiII",
         LC_SEGMENT_64,
-        segment_size,
+        72 + 80,
         b"__TEXT",
         0,
-        0x1000,
-        0x1000,
-        0x500,
+        0x4000,
+        0,
+        0x4000,
         7,
         5,
         1,
         0,
-    ) + struct.pack(
+    )
+    section = struct.pack(
         "<16s16sQQIIIIIIII",
         b"__text",
         b"__TEXT",
-        0,
+        0x100008000,
         0x100,
-        0x1000,
+        section_offset,
         0,
         0,
         0,
@@ -197,73 +200,118 @@ def test_add_load_dylib_relocates_file_offsets() -> None:
         0,
         0,
     )
-    signature = struct.pack("<III", LC_CODE_SIGNATURE, 12, 0x2000)
-    commands = segment + signature
-    header = struct.pack(
-        "<IiiIIIII", MH_MAGIC_64, 0x0100000C, 0, 2, 2, len(commands), 0, 0
-    )
-    original = header + commands + b"x" * 0x3000
+    return segment + section
 
-    patched = add_load_dylib(original, "@rpath/libXinstaCore.dylib")
+
+def _symtab(symoff: int, stroff: int) -> bytes:
+    return struct.pack("<IIIIII", 0x2, 24, symoff, 1, stroff, 0x10)
+
+
+def _code_signature(dataoff: int) -> bytes:
+    return struct.pack("<IIII", LC_CODE_SIGNATURE, 16, dataoff, 0x100)
+
+
+def _lc_main(entryoff: int) -> bytes:
+    return struct.pack("<IIQQ", 0x80000028, 24, entryoff, 0)
+
+
+def _padded_image(commands: list[bytes], content_start: int, content: bytes) -> bytes:
+    body = b"".join(commands)
+    header = struct.pack(
+        "<IiiIIIII", MH_MAGIC_64, 0x0100000C, 0, 2, len(commands), len(body), 0, 0
+    )
+    prefix = header + body
+    assert len(prefix) <= content_start
+    return prefix + b"\x00" * (content_start - len(prefix)) + content
+
+
+def _commands_end(image: bytes) -> int:
+    sizeofcmds = struct.unpack_from("<I", image, 20)[0]
+    return 32 + sizeofcmds
+
+
+def test_add_load_dylib_appends_into_padding_without_relocation() -> None:
+    commands = [
+        _seg_text64(0x4000),
+        _symtab(0x4100, 0x4200),
+        _code_signature(0x4300),
+        _lc_main(0x4010),
+    ]
+    image = _padded_image(commands, 0x4000, b"\xAA" * 0x400)
+    old_end = _commands_end(image)
+
+    patched = add_load_dylib(image, "@rpath/libXinstaCore.dylib")
+
+    new_size = 56
     magic, _cpu, _sub, _type, ncmds, sizeofcmds, _flags, _reserved = struct.unpack_from(
         "<IiiIIIII", patched
     )
     assert magic == MH_MAGIC_64
-    assert ncmds == 3
-    assert sizeofcmds == len(commands) + 56
+    assert ncmds == len(commands) + 1
+    assert sizeofcmds == _commands_end(image) - 32 + new_size
+    assert len(patched) == len(image)
 
-    assert struct.unpack_from("<Q", patched, 32 + 40)[0] == 0x1000 + 56
-    assert struct.unpack_from("<I", patched, 32 + 72 + 48)[0] == 0x1000 + 56
-    assert struct.unpack_from("<I", patched, 32 + segment_size + 8)[0] == 0x2000 + 56
-    assert any(ref.name == "@rpath/libXinstaCore.dylib" for ref in parse_macho(patched)[0].dylibs)
-
-
-def test_add_load_dylib_preserves_header_segment_mapping() -> None:
-    text = struct.pack(
-        "<II16sQQQQiiII",
-        LC_SEGMENT_64,
-        72,
-        b"__TEXT",
-        0,
-        0x1000,
-        0,
-        0x1000,
-        7,
-        5,
-        0,
-        0,
-    )
-    linkedit = struct.pack(
-        "<II16sQQQQiiII",
-        LC_SEGMENT_64,
-        72,
-        b"__LINKEDIT",
-        0x1000,
-        0x1000,
-        0x2000,
-        0x100,
-        7,
-        5,
-        0,
-        0,
-    )
-    chained_fixups = struct.pack("<III", 0x80000034, 12, 0x2100)
-    exports_trie = struct.pack("<III", 0x80000033, 12, 0x2200)
-    commands = text + linkedit + chained_fixups + exports_trie
-    header = struct.pack(
-        "<IiiIIIII", MH_MAGIC_64, 0x0100000C, 0, 2, 4, len(commands), 0, 0
+    # Only the header fields and the appended command differ; every other byte
+    # is identical, so no file offset, VM address or signature position moved.
+    assert patched[32:old_end] == image[32:old_end]
+    assert patched[old_end + new_size :] == image[old_end + new_size :]
+    command, command_size, name_offset = struct.unpack_from("<III", patched, old_end)
+    assert command == LC_LOAD_DYLIB
+    assert command_size == new_size
+    assert patched[old_end + name_offset :].split(b"\x00", 1)[0] == (
+        b"@rpath/libXinstaCore.dylib"
     )
 
-    patched = add_load_dylib(header + commands + b"x" * 0x3000, "@rpath/libXinstaCore.dylib")
+    # Referenced file offsets are bit-identical to the source image.
+    assert struct.unpack_from("<I", patched, 32 + 72 + 48)[0] == 0x4000
+    assert struct.unpack_from("<I", patched, 32 + 72 + 80 + 8)[0] == 0x4100
+    assert struct.unpack_from("<I", patched, 32 + 72 + 80 + 24 + 8)[0] == 0x4300
+    assert struct.unpack_from("<Q", patched, 32 + 72 + 80 + 24 + 16 + 8)[0] == 0x4010
+    assert any(
+        ref.name == "@rpath/libXinstaCore.dylib" for ref in parse_macho(patched)[0].dylibs
+    )
 
-    delta = 56
-    assert struct.unpack_from("<Q", patched, 32 + 40)[0] == 0
-    assert struct.unpack_from("<Q", patched, 32 + 48)[0] == 0x1000 + delta
-    linkedit_base = 32 + 72
-    assert struct.unpack_from("<Q", patched, linkedit_base + 40)[0] == 0x2000 + delta
-    assert struct.unpack_from("<Q", patched, linkedit_base + 48)[0] == 0x100
-    assert struct.unpack_from("<I", patched, 32 + 144 + 8)[0] == 0x2100 + delta
-    assert struct.unpack_from("<I", patched, 32 + 156 + 8)[0] == 0x2200 + delta
+
+def test_add_load_dylib_rejects_insufficient_padding() -> None:
+    commands = [_seg_text64(0), _symtab(0, 0), _code_signature(0), _lc_main(0)]
+    body_len = sum(len(command) for command in commands)
+    tight_offset = 32 + body_len + 16
+    commands[0] = _seg_text64(tight_offset)
+    image = _padded_image(commands, tight_offset, b"\xAA" * 0x100)
+
+    with pytest.raises(MachOError):
+        add_load_dylib(image, "@rpath/libXinstaCore.dylib")
+
+
+def test_add_load_dylib_rejects_nonzero_padding() -> None:
+    commands = [_seg_text64(0x4000)]
+    image = bytearray(_padded_image(commands, 0x4000, b"\xAA" * 0x400))
+    image[_commands_end(bytes(image))] = 0xFF
+
+    with pytest.raises(MachOError):
+        add_load_dylib(bytes(image), "@rpath/libXinstaCore.dylib")
+
+
+def test_add_load_dylib_rejects_file_offset_collision() -> None:
+    commands = [_seg_text64(0x4000)]
+    body_len = sum(len(command) for command in commands)
+    symtab = _symtab(0, 0)
+    commands.append(symtab)
+    commands_end = 32 + body_len + len(symtab)
+    colliding = commands_end + 8
+    commands[-1] = _symtab(colliding, 0)
+    image = _padded_image(commands, 0x4000, b"\xAA" * 0x400)
+
+    with pytest.raises(MachOError):
+        add_load_dylib(image, "@rpath/libXinstaCore.dylib")
+
+
+def test_add_load_dylib_rejects_unknown_command() -> None:
+    unknown = struct.pack("<II", 0x9999, 16) + b"\x00" * 8
+    image = _padded_image([unknown], 0x4000, b"\xAA" * 0x400)
+
+    with pytest.raises(MachOError):
+        add_load_dylib(image, "@rpath/libXinstaCore.dylib")
 
 
 def test_add_load_dylib_rejects_fileset_entries() -> None:
