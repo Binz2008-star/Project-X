@@ -45,10 +45,10 @@ This stacked increment converges the read-only IPA analyzer from Draft PR #7 wit
 
 Local Python 3.14.7 in the repository virtual environment (2026-11-21), with Windows `--basetemp` overrides:
 
-- `pytest -q tests/test_ipa_analysis.py` → **83 passed, 1 skipped** (symlink test unavailable on this filesystem; Linux CI exercises it).
+- `pytest -q tests/test_ipa_analysis.py` → **86 passed, 1 skipped** (symlink test unavailable on this filesystem; Linux CI exercises it).
 - `pytest -q tests/test_build_manager_preflight.py tests/test_build_manager_authorization.py` → **159 passed**.
 - `pytest -q tests/test_build_manager_integration.py` → **18 passed**.
-- Combined API, staging guard, analyzer, preflight, authorization and integration suites → **291 passed, 30 skipped**.
+- Combined API, staging guard, analyzer, preflight, authorization and integration suites → **294 passed, 30 skipped**.
 - `unittest discover -s tests -p test_licensing.py -v` → **OK (7 tests)**.
 - `python -m scripts.export_openapi --check` → **OpenAPI schema matches implementation**.
 - Isolated SQLite `alembic upgrade head` + `alembic check` → clean, no new upgrade operations.
@@ -72,7 +72,7 @@ CI uses Python 3.12. Exact final-head run IDs and results are recorded in the PR
 
 ## Independent review
 
-Independent reviews have required multiple correction rounds. PR #9 received explicit `APPROVE` on `705bcd9` after B9-R1–R7 closure. PR #7's review of `6b1f691` returned `REQUEST CHANGES` with three further findings (A7-R6–R8); those are fixed at `a4c19c9` and reconverged here. PR #10 had already received `APPROVE` on the prior converged head, but the new analyzer fixes require a fresh verdict on this exact final head. No PR is merge-ready until each has an explicit approval on its final head.
+Independent reviews have required multiple correction rounds. PR #9 received explicit `APPROVE` on `705bcd9` after B9-R1–R7 closure. PR #7 received explicit `APPROVE` on `46816c5` after A7-R1–R10 closure. PR #10 received `APPROVE` on the earlier converged head `aa10987`, but the final PR #7 publication-hardening fixes require a fresh verdict on this exact final head. No PR is merge-ready until each has an explicit approval on its final head.
 
 ## Next executable milestone
 

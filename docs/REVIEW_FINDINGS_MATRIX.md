@@ -14,7 +14,7 @@ Status values: **FIXED** (code, regression test and local verification present),
 | A7-6 | FIXED | Input descriptor identity captured and rechecked; no-overwrite link publication refuses a target recreated as the input. | Input-collision, hard-link, symlink and publication-race tests. |
 | A7-7 | FIXED | Typed dependency refs; weak unresolved refs are warnings; arm64 subtype `1` normalised. | Weak/required split tests and real-byte subtype tests. |
 | A7-8 | FIXED | Documentation no longer treats the private reference check as CI evidence or a compatibility claim. | `docs/IPA_ANALYSIS.md`. |
-| A7-9 | FIXED | `origin/main` `0ecbe9c` merged without force; fresh CI green on each final head. | GH Actions runs `44840341459`, `44840347797`, `44841414033`, `44841419556`. |
+| A7-9 | FIXED | `origin/main` `0ecbe9c` merged without force; fresh CI green on each final head. | Final runs `44844881381` and `44844886566`. |
 | A7-R1 | FIXED | Independent re-review finding: nested plist values now use the same typed validation and cannot emit non-string fields or crash the CLI. | Parametrised nested-plist tests and CLI mapping. |
 | A7-R2 | FIXED | Independent re-review finding: root detection no longer depends on a readable nested plist. | Root-without-plist inspection and CLI tests. |
 | A7-R3 | FIXED | Independent re-review finding: publication race can no longer overwrite the archive with report bytes. | Monkeypatched publication-race test; static symlink test retained. |
@@ -23,6 +23,8 @@ Status values: **FIXED** (code, regression test and local verification present),
 | A7-R6 | FIXED | Publication never unlinks the target; existing report/symlink targets are refused, closing the pre-unlink TOCTOU window. | Existing-target, symlink, no-unlink tracer and publication-race tests. |
 | A7-R7 | FIXED | All input-path I/O errors, not only `FileNotFoundError`, emit fixed refusal text without path or traceback. | Private-directory CLI test. |
 | A7-R8 | FIXED | Non-positive numeric limits produce fixed `INVALID_ARGUMENTS` instead of an uncaught `ValueError`. | Parametrised CLI limit tests. |
+| A7-R9 | FIXED | Temporary cleanup removes only the inode captured from the original descriptor; a replaced temporary path is never unlinked, so input archive bytes survive. | Temporary-inode swapping race test. |
+| A7-R10 | FIXED | All temporary creation/write/link/cleanup `OSError`s reduce to fixed `OUTPUT_WRITE_FAILED`; output-parent errors do not echo private paths or tracebacks. | Nonexistent private output directory and failing-cleanup tests. |
 
 ## PR #9 — Build Manager (B9)
 
@@ -52,7 +54,7 @@ Status values: **FIXED** (code, regression test and local verification present),
 | C-2 | FIXED | Exact inspected-byte SHA-256 binding; appended archive bytes invalidate the manifest. | `test_hash_binding_uses_the_real_artifact_hash`, `test_modified_archive_bytes_break_the_exact_hash_binding`. |
 | C-3 | FIXED | Forged authorization, unexpected fields, unsafe identifiers, malformed report, ambiguous root and unsupported architecture rejected. | Integration rejection tests. |
 | C-4 | FIXED | Analyzer schema `1.1` and legacy `1.0` accepted; unknown schema rejected without echo. | `test_current_and_legacy_report_schemas_are_accepted`. |
-| C-5 | FIXED | No private paths, secret-looking values or local directories copied into output. Analyzer CLI now also uses fixed argument/missing-file errors. | Warning-retention and CLI private-path tests, A7-R5 tests, plus rejection no-echo assertions. |
+| C-5 | FIXED | No private paths, secret-looking values or local directories copied into output. Analyzer CLI uses fixed argument, input-error and publication-error codes. | Warning-retention and CLI private-path tests, A7-R5/R7/R10 tests, plus rejection no-echo assertions. |
 | C-6 | FIXED | Plan remains `dry_run`, `execution_permitted = false`, advisory authorization, blocked execution steps. | First integration test and B9 authorization tests. |
 
 ## Not code findings — owner/external blockers
