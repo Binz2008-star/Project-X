@@ -53,6 +53,7 @@ PRIVATE_PILOT_BUNDLE_ID = "com.projectx.xinsta.pilot"
 PRIVATE_PILOT_IDENTITY = ("com.projectx.xinsta.pilot", "456.0.0", "1114925422")
 PRIVATE_PILOT_SOURCE_SHA256 = LOAD_ONLY_PROOF_SHA256
 PRIVATE_PILOT_ADAPTER = "com.projectx.xinsta.pilot@456.0.0@1114925422"
+PRIVATE_PILOT_DISPLAY_NAME = "Xinsta"
 PRIVATE_PILOT_APP_GROUP_PREFIX = "group.com.projectx.xinsta.pilot"
 PRIVATE_PILOT_EXTENSION_PREFIX = "com.projectx.xinsta.pilot."
 PRIVATE_PILOT_URL_SCHEME = "xinsta-pilot-loadproof"
@@ -586,6 +587,8 @@ def _check_private_pilot(
         add_once("PRIVATE_PILOT_ARTIFACT_NOT_DISTINCT", "the pilot artifact must be a distinct package")
     if pilot.adapter_identifier != PRIVATE_PILOT_ADAPTER:
         add_once("PRIVATE_PILOT_ADAPTER_NOT_PINNED", "the pilot adapter identifier is not pinned")
+    if identity.get("display_name") != PRIVATE_PILOT_DISPLAY_NAME:
+        add_once("PRIVATE_PILOT_DISPLAY_NAME_MISMATCH", "the pilot display name is not pinned")
     if pilot.replace_existing_app is not False or pilot.preserve_original_data is not True:
         add_once("PRIVATE_PILOT_COEXISTENCE_DECLARATION_INVALID", "coexistence flags are invalid")
 

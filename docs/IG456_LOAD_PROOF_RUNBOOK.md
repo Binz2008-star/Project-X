@@ -14,6 +14,20 @@ swizzling, feature use, account login, redistribution, commercial use, a merge,
 or any change to `main`. The repository tool remains dry-run-only:
 `execution_permitted` stays `false` and all signing/device steps stay blocked.
 
+This is the original-identity load-only proof path. For the independently signed
+private pilot identity (`com.projectx.xinsta.pilot`), use
+`docs/IG456_PRIVATE_PILOT.md` instead; do not substitute identities between the
+two runbooks.
+
+The commands below use macOS because that is the currently reviewed toolchain,
+not because installation is theoretically macOS-only. On the Windows host
+checked in this execution phase, Apple Mobile Device Service and iTunes COM were
+available, but the attached-device count and present-only Apple PnP device count
+were both `0`; Sideloadly, `ios-deploy`, signing identities and provisioning
+profiles were absent. Windows is therefore **not currently ready** to complete
+the installation flow. macOS tooling remains a candidate requirement only until
+an independently approved Windows installer path exists.
+
 ## Pinned inputs
 
 | Field | Required value |
@@ -131,6 +145,10 @@ This modifies only the disposable copy under `WORK_DIR`. The original IPA is
 read-only.
 
 ## 5. Insert the load command and rpath
+
+The pinned Instagram executable already contains `@executable_path/Frameworks`.
+The conditional below must not add a duplicate; verify the existing rpath line
+before proceeding.
 
 ```bash
 "$INSERT_DYLIB" --inplace --all-yes "@rpath/libXinstaCore.dylib" "$EXECUTABLE_PATH"

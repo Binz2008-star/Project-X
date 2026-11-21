@@ -26,6 +26,7 @@ adapter relaxation, or a hook plan.
 | Field | Production reference | Private pilot |
 | --- | --- | --- |
 | Bundle identifier | `com.burbn.instagram` | `com.projectx.xinsta.pilot` |
+| Display name | `Instagram` | `Xinsta` |
 | Version | `456.0.0` | `456.0.0` |
 | Build | `1114925422` | `1114925422` |
 | Adapter binding | `com.burbn.instagram@456.0.0@1114925422` | `com.projectx.xinsta.pilot@456.0.0@1114925422` |
@@ -91,11 +92,17 @@ IPA. Its `execution_permitted` field is always `false`.
 
 Verified against the pinned source and the downloaded CI artifact:
 `source.sha256` equals the pinned Instagram hash, `source.extension_count = 8`,
-`source.url_scheme_count = 8`, `dylib.sha256` equals
+`source.url_scheme_count = 8`, `source.main_executable_rpaths` is exactly
+`@executable_path/Frameworks`, `source.core_load_command_present = false`,
+all 14 nested bundles have signature metadata with none unsigned, no source App
+Groups, Keychain groups or associated-domains entitlement are declared, and no
+signature-verification claim is made. `dylib.sha256` equals
 `bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff`,
 `dylib.load_command_count = 21`, `dylib.dependencies = system_only`, and
-`dylib.signed = false`. The output contains no paths, timestamps, secrets or
-device identifiers.
+`dylib.signed = false`. The pinned `pilot_identity.display_name` is `Xinsta`,
+and the rpath step is marked `already_present` rather than proposing a duplicate
+load command. The output contains no paths, timestamps, secrets or device
+identifiers.
 
 ## Build Manager policy
 
@@ -105,7 +112,7 @@ is present. It fails closed when:
 
 - the source hash is not the exact pinned Instagram IPA hash;
 - the pilot artifact hash equals the source hash;
-- the bundle, version, build, adapter identifier, or rights basis is not pinned;
+- the bundle, display name, version, build, adapter identifier, or rights basis is not pinned;
 - `replace_existing_app` is not `false` or `preserve_original_data` is not `true`;
 - URL schemes, App Groups, Keychain groups, extension identifiers, or profile
   entitlements differ from the pilot declaration;
@@ -133,36 +140,42 @@ step in the dry-run plan.
 
 ## Windows host investigation
 
-An earlier session observed Apple USB/WPD nodes with status `OK` and iTunes,
-3uTools and Python installed. That is historical evidence only. A fresh check on
-the final head found the device is **not currently readable from Windows**:
+An earlier session observed Apple USB/WPD nodes with status `OK`. That is
+historical evidence only. A fresh read-only check in this execution phase found
+the device is **not currently readable from Windows**:
 
 | Observation | Result |
 | --- | --- |
 | Apple Mobile Device Service | running, automatic start — `VERIFIED` |
 | iTunes COM version | `12.13.10.3` — `VERIFIED` |
 | iTunes COM device count | `0` — `VERIFIED` |
-| Present-only Apple PnP devices | none; Apple nodes are reported as phantom — `VERIFIED` |
+| Present-only Apple PnP devices | `0` — `VERIFIED` |
 | Windows trust/data-mode access | `NOT TESTED` because no device is currently readable |
-| iOS version | `NOT TESTED` |
-| Pairing validity | `NOT TESTED` |
-| Developer Mode state | `NOT TESTED` |
+| iOS version | `NOT TESTED` — no readable device |
+| Pairing validity | `NOT TESTED` — no readable device |
+| Developer Mode state | `NOT TESTED` — no Windows read-only path available |
 
-The following were not observed or were absent: `NOT TESTED` / `FAILED`.
+The following were checked without printing a UDID, serial, Apple ID, or personal
+device name:
 
 | Item | Status |
 | --- | --- |
-| Sideloadly installed or run | `NOT TESTED` |
+| Sideloadly installed or run | `FAILED` — not installed on this Windows host |
 | `xcodebuild`, `clang`, `make`, `ruby`, `pod`, Theos | absent on Windows host |
 | `codesign`, `ios-deploy`, `idevice_id`, `idevicedevmodectl` | absent on Windows host |
-| Signing identity with private key | `FAILED` — none found |
-| Provisioning profiles | `FAILED` — none found |
+| Code-signing certificate with code-signing EKU | `FAILED` — none found |
+| Provisioning profile files | `FAILED` — none found |
 | Installable injected/repacked IPA | `NOT TESTED` |
 
 Windows USB visibility alone is not a signing capability. The macOS build path
-remains the reviewed way to produce the unsigned dylib. Sideloadly may be a
-candidate Windows installer only after an independent review of the exact tool
-build, signing inputs, profile, and uninstall path; that review is `BLOCKED`.
+remains the reviewed way to produce the unsigned dylib. Sideloadly is not
+installed here, so it cannot complete the flow in the current host state; it
+would still require an independent review of the exact tool build, signing
+inputs, profile, and uninstall path. macOS tooling is not strictly required for
+the *idea* of a Windows installation, but no approved Windows installer path is
+currently available. A macOS host with `ios-deploy` and a valid development
+profile remains the reviewed candidate; it is `BLOCKED` pending owner-approved
+signing inputs and device scope.
 
 ## Candidate final installation procedure
 

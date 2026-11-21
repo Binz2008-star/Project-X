@@ -16,6 +16,7 @@ from ..buildmanager.preflight import (
     PRIVATE_PILOT_ADAPTER,
     PRIVATE_PILOT_APP_GROUP_PREFIX,
     PRIVATE_PILOT_BUNDLE_ID,
+    PRIVATE_PILOT_DISPLAY_NAME,
     PRIVATE_PILOT_EXTENSION_PREFIX,
     PRIVATE_PILOT_RIGHTS_BASIS,
     PRIVATE_PILOT_SOURCE_SHA256,
@@ -29,7 +30,7 @@ from ..ipa.safety import ArchiveSafetyError
 PLAN_SCHEMA_VERSION = "1.0"
 DYLIB_INSTALL_NAME = "@rpath/libXinstaCore.dylib"
 DYLIB_RPATH = "@executable_path/Frameworks"
-PILOT_DISPLAY_NAME = "Xinsta Private Pilot"
+ASSOCIATED_DOMAINS_ENTITLEMENT = "com.apple.developer.associated-domains"
 MAX_DYLIB_BYTES = 64 * 1024 * 1024
 SYSTEM_DYLIB_PREFIXES = ("/usr/lib/", "/System/Library/")
 
@@ -88,6 +89,27 @@ def _inspect_source(ipa_path: str | Path) -> dict:
     if not identity.url_schemes:
         _fail("SOURCE_URL_SCHEME_INVENTORY_MISSING", "source URL scheme inventory is empty")
 
+    main_slices = report.macho_slices
+    rpaths = sorted({path for item in main_slices for path in item.rpaths})
+    core_load_command_present = any(
+        ref.name == DYLIB_INSTALL_NAME
+        for item in main_slices
+        for ref in item.dylibs
+        if ref.kind == "load"
+    )
+    if core_load_command_present:
+        _fail("SOURCE_CORE_LOAD_COMMAND_PRESENT", "source already links the Core dylib")
+
+    signing = report.signing
+    profile = signing.provisioning_profile
+    if signing.verification.get("verified", False) is not False:
+        _fail("SOURCE_SIGNING_VERIFICATION_CLAIM", "static inspection claimed signature verification")
+    associated_domains_present = bool(
+        profile and ASSOCIATED_DOMAINS_ENTITLEMENT in profile.entitlement_keys
+    )
+    if associated_domains_present:
+        _fail("SOURCE_ASSOCIATED_DOMAINS_PRESENT", "source declares associated domains")
+
     return {
         "sha256": digest,
         "bundle_id": identity.bundle_id,
@@ -98,6 +120,21 @@ def _inspect_source(ipa_path: str | Path) -> dict:
         "encrypted": False,
         "url_scheme_count": len(identity.url_schemes),
         "extension_count": len(extensions),
+        "main_executable_rpaths": rpaths,
+        "core_load_command_present": False,
+        "signing_metadata": {
+            "app_code_resources_present": signing.app_code_resources_present,
+            "code_signature_entry_count": signing.code_signature_entry_count,
+            "nested_bundles_total": signing.nested_bundles_total,
+            "nested_bundles_with_signature_metadata": signing.nested_bundles_with_signature_metadata,
+            "nested_bundles_unsigned_count": len(signing.nested_bundles_unsigned),
+            "verification_claimed": signing.verification.get("verified") is True,
+            "provisioning_profile_present": signing.provisioning_profile_present,
+            "associated_domains_present": associated_domains_present,
+            "entitlement_keys": sorted(profile.entitlement_keys) if profile else [],
+            "app_groups": sorted(profile.app_groups) if profile else [],
+            "keychain_access_groups": sorted(profile.keychain_access_groups) if profile else [],
+        },
     }
 
 
@@ -171,7 +208,7 @@ def build_pilot_package_plan(ipa_path: str | Path, dylib_path: str | Path) -> di
             "bundle_id": PRIVATE_PILOT_BUNDLE_ID,
             "version": LOAD_ONLY_PROOF_IDENTITY[1],
             "build_number": LOAD_ONLY_PROOF_IDENTITY[2],
-            "display_name": PILOT_DISPLAY_NAME,
+            "display_name": PRIVATE_PILOT_DISPLAY_NAME,
             "adapter_identifier": PRIVATE_PILOT_ADAPTER,
             "rights_basis": PRIVATE_PILOT_RIGHTS_BASIS,
             "url_scheme": PRIVATE_PILOT_URL_SCHEME,
@@ -188,6 +225,20 @@ def build_pilot_package_plan(ipa_path: str | Path, dylib_path: str | Path) -> di
                 "code": "REWRITE_BUNDLE_IDENTIFIER",
                 "status": "planned",
                 "detail": "Rewrite the app bundle identifier to the private pilot identifier.",
+            },
+            {
+                "code": "SET_DISPLAY_NAME",
+                "status": "planned",
+                "detail": "Set CFBundleDisplayName to the pinned Xinsta value.",
+            },
+            {
+                "code": "VERIFY_NO_ASSOCIATED_DOMAINS",
+                "status": (
+                    "planned"
+                    if source["signing_metadata"]["associated_domains_present"]
+                    else "already_absent"
+                ),
+                "detail": "Ensure the pilot app declares no associated-domains or app-links entitlement.",
             },
             {
                 "code": "REWRITE_URL_SCHEMES",
@@ -215,9 +266,13 @@ def build_pilot_package_plan(ipa_path: str | Path, dylib_path: str | Path) -> di
                 "detail": "Add the pinned dylib install name to the main executable load commands.",
             },
             {
-                "code": "ADD_RPATH",
-                "status": "planned",
-                "detail": "Add @executable_path/Frameworks to the main executable rpath.",
+                "code": "ENSURE_DYLIB_RPATH",
+                "status": (
+                    "already_present"
+                    if DYLIB_RPATH in source["main_executable_rpaths"]
+                    else "planned"
+                ),
+                "detail": "Ensure @executable_path/Frameworks is present exactly once in the main executable.",
             },
         ],
         "blocked_steps": [

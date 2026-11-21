@@ -19,6 +19,7 @@ from project_x.buildmanager import (
     PRIVATE_PILOT_ADAPTER,
     PRIVATE_PILOT_APP_GROUP_PREFIX,
     PRIVATE_PILOT_BUNDLE_ID,
+    PRIVATE_PILOT_DISPLAY_NAME,
     PRIVATE_PILOT_EXTENSION_PREFIX,
     PRIVATE_PILOT_RIGHTS_BASIS,
     PRIVATE_PILOT_URL_SCHEME,
@@ -200,8 +201,8 @@ def private_pilot_report() -> dict:
     report["artifact"]["sha256"] = PILOT_SHA
     report["identity"].update(
         bundle_id=PRIVATE_PILOT_BUNDLE_ID,
-        name="Xinsta Private Pilot",
-        display_name="Xinsta Private Pilot",
+        name=PRIVATE_PILOT_DISPLAY_NAME,
+        display_name=PRIVATE_PILOT_DISPLAY_NAME,
         version="456.0.0",
         build_number="1114925422",
         executable="Payload/XinstaPilot.app/XinstaPilot",
@@ -476,6 +477,8 @@ def test_private_pilot_produces_dry_run_plan() -> None:
          "PRIVATE_PILOT_ARTIFACT_NOT_DISTINCT"),
         (lambda m: m["private_pilot"].update(adapter_identifier=IG456_ADAPTER), lambda r: None,
          "PRIVATE_PILOT_ADAPTER_NOT_PINNED"),
+        (lambda m: None, lambda r: r["identity"].update(display_name="Xinsta Private Pilot"),
+         "PRIVATE_PILOT_DISPLAY_NAME_MISMATCH"),
         (lambda m: m["private_pilot"].update(app_groups=["group.com.burbn.instagram"]),
          lambda r: None, "PRIVATE_PILOT_APP_GROUP_NOT_ALLOWED"),
         (lambda m: m["private_pilot"].update(keychain_access_groups=["ABC.teamID"]),

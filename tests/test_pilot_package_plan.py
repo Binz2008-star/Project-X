@@ -39,8 +39,9 @@ def _source_info() -> dict:
     return info
 
 
-def _source_ipa(tmp_path, *, info: dict | None = None):
-    entries = base_entries(executable=build_macho(), info=info or _source_info())
+def _source_ipa(tmp_path, *, info: dict | None = None, executable: bytes | None = None):
+    main_executable = executable or build_macho(rpaths=("@executable_path/Frameworks",))
+    entries = base_entries(executable=main_executable, info=info or _source_info())
     extension = APP + "PlugIns/Share.appex/"
     entries[extension + "Info.plist"] = plistlib.dumps(
         {
@@ -86,8 +87,16 @@ def test_plan_is_deterministic_and_dry_run(tmp_path, monkeypatch) -> None:
     assert first["execution_permitted"] is False
     assert first["source"]["sha256"] == digest
     assert first["source"]["extension_count"] == 1
+    assert first["source"]["main_executable_rpaths"] == ["@executable_path/Frameworks"]
+    assert first["source"]["core_load_command_present"] is False
+    assert first["source"]["signing_metadata"]["verification_claimed"] is False
     assert first["dylib"]["dependencies"] == "system_only"
     assert first["pilot_identity"]["bundle_id"] == "com.projectx.xinsta.pilot"
+    assert first["pilot_identity"]["display_name"] == "Xinsta"
+    rpath_step = next(
+        step for step in first["planned_changes"] if step["code"] == "ENSURE_DYLIB_RPATH"
+    )
+    assert rpath_step["status"] == "already_present"
     assert first["verification"]["hook"] is False
     assert first["verification"]["swizzle"] is False
     assert {step["code"] for step in first["planned_changes"]}
@@ -103,6 +112,24 @@ def test_wrong_source_hash_is_rejected(tmp_path, monkeypatch) -> None:
     with pytest.raises(planner.PilotPlanError) as caught:
         planner.build_pilot_package_plan(ipa, dylib)
     assert caught.value.code == "SOURCE_HASH_MISMATCH"
+
+
+def test_existing_core_load_command_is_rejected(tmp_path, monkeypatch) -> None:
+    executable = build_macho(
+        rpaths=("@executable_path/Frameworks",),
+        dylibs=(
+            ("@rpath/libXinstaCore.dylib", LC_LOAD_DYLIB),
+            ("/usr/lib/libSystem.B.dylib", LC_LOAD_DYLIB),
+        ),
+    )
+    ipa, digest = _source_ipa(tmp_path, executable=executable)
+    monkeypatch.setattr(planner, "PRIVATE_PILOT_SOURCE_SHA256", digest)
+    dylib = tmp_path / "libXinstaCore.dylib"
+    dylib.write_bytes(_dylib())
+
+    with pytest.raises(planner.PilotPlanError) as caught:
+        planner.build_pilot_package_plan(ipa, dylib)
+    assert caught.value.code == "SOURCE_CORE_LOAD_COMMAND_PRESENT"
 
 
 @pytest.mark.parametrize(
