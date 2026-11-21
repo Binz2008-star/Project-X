@@ -122,32 +122,38 @@ def read_plist(archive: SafeArchive, name: str) -> dict:
     try:
         value = plistlib.loads(raw)
     except Exception as exc:  # plistlib raises several unrelated exception types
-        raise BundleError(f"{name!r} is not a readable property list: {exc}") from exc
+        # Parser details and archive-controlled names must never reach a report.
+        raise BundleError("a property list could not be read") from exc
     if not isinstance(value, dict):
-        raise BundleError(f"{name!r} does not contain a dictionary at its root")
+        raise BundleError("a property list does not contain a dictionary at its root")
     return value
 
 
 def find_app_root(archive: SafeArchive) -> str:
-    """Return the ``Payload/<Name>.app/`` directory holding the main bundle."""
+    """Return the single top-level ``Payload/<Name>.app/`` directory."""
+    directories = set(implied_directories(archive.names))
+    directories.update(
+        name
+        for name in archive.names
+        if name.startswith("Payload/") and name.endswith(".app/") and name.count("/") == 2
+    )
     candidates = sorted(
-        {
-            name[: -len("Info.plist")]
-            for name in archive.names
-            if name.startswith("Payload/")
-            and name.count("/") == 2
-            and name.endswith(".app/Info.plist")
-        }
+        path
+        for path in directories
+        if path.startswith("Payload/") and path.endswith(".app/") and path.count("/") == 2
     )
     if not candidates:
-        raise BundleError("no Payload/*.app/Info.plist found; this is not an application IPA")
+        raise BundleError("no Payload/*.app/ directory found; this is not an application IPA")
     if len(candidates) > 1:
         # Never list the candidate names: an attacker controls them and they may
         # contain private paths or other sensitive text.
         raise AmbiguousAppRootError(
             f"more than one top-level application root was found ({len(candidates)} candidates)"
         )
-    return candidates[0]
+    root = candidates[0]
+    if not archive.has(root + "Info.plist"):
+        raise BundleError("no Payload/*.app/Info.plist found; this is not an application IPA")
+    return root
 
 
 def identity_from_info(info: dict) -> AppIdentity:
@@ -187,8 +193,8 @@ def describe_bundle(archive: SafeArchive, path: str, kind: str) -> EmbeddedBundl
         except BundleError:
             info = {}
 
-    executable_name = info.get("CFBundleExecutable")
-    if not executable_name:
+    executable_name = _optional_string(info, "CFBundleExecutable")
+    if executable_name is None:
         leaf = directory.rstrip("/").rsplit("/", 1)[-1]
         executable_name = leaf[: -(len(kind) + 1)] if leaf.endswith("." + kind) else leaf
     executable_path = directory + executable_name
@@ -196,9 +202,9 @@ def describe_bundle(archive: SafeArchive, path: str, kind: str) -> EmbeddedBundl
     return EmbeddedBundle(
         path=directory,
         kind=kind,
-        bundle_id=info.get("CFBundleIdentifier"),
-        name=info.get("CFBundleName") or info.get("CFBundleDisplayName"),
-        version=info.get("CFBundleShortVersionString"),
+        bundle_id=_optional_string(info, "CFBundleIdentifier"),
+        name=_optional_string(info, "CFBundleName") or _optional_string(info, "CFBundleDisplayName"),
+        version=_optional_string(info, "CFBundleShortVersionString"),
         executable=executable_path,
         executable_present=archive.has(executable_path),
         has_info_plist=has_plist,
