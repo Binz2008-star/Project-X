@@ -17,6 +17,7 @@ from ..buildmanager.preflight import (
     PRIVATE_PILOT_APP_GROUP_PREFIX,
     PRIVATE_PILOT_BUNDLE_ID,
     PRIVATE_PILOT_DISPLAY_NAME,
+    PRIVATE_PILOT_DYLIB_SHA256,
     PRIVATE_PILOT_EXTENSION_PREFIX,
     PRIVATE_PILOT_RIGHTS_BASIS,
     PRIVATE_PILOT_SOURCE_SHA256,
@@ -90,12 +91,14 @@ def _inspect_source(ipa_path: str | Path) -> dict:
         _fail("SOURCE_URL_SCHEME_INVENTORY_MISSING", "source URL scheme inventory is empty")
 
     main_slices = report.macho_slices
-    rpaths = sorted({path for item in main_slices for path in item.rpaths})
+    rpath_values = [path for item in main_slices for path in item.rpaths]
+    if rpath_values.count(DYLIB_RPATH) > 1:
+        _fail("SOURCE_RPATH_DUPLICATE", "source already declares the Core dylib rpath more than once")
+    rpaths = sorted(set(rpath_values))
     core_load_command_present = any(
         ref.name == DYLIB_INSTALL_NAME
         for item in main_slices
         for ref in item.dylibs
-        if ref.kind == "load"
     )
     if core_load_command_present:
         _fail("SOURCE_CORE_LOAD_COMMAND_PRESENT", "source already links the Core dylib")
@@ -147,6 +150,8 @@ def _inspect_dylib(dylib_path: str | Path) -> dict:
         _fail("DYLIB_SIZE_INVALID", "Core dylib size is outside the accepted range")
 
     digest = hashlib.sha256(data).hexdigest()
+    if digest != PRIVATE_PILOT_DYLIB_SHA256:
+        _fail("DYLIB_HASH_MISMATCH", "Core dylib hash is not the reviewed CI artifact")
     try:
         slices = parse_macho(data)
     except MachOError:

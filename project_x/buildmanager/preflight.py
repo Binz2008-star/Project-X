@@ -52,6 +52,11 @@ PRIVATE_PILOT_RIGHTS_BASIS = "private-pilot-installability"
 PRIVATE_PILOT_BUNDLE_ID = "com.projectx.xinsta.pilot"
 PRIVATE_PILOT_IDENTITY = ("com.projectx.xinsta.pilot", "456.0.0", "1114925422")
 PRIVATE_PILOT_SOURCE_SHA256 = LOAD_ONLY_PROOF_SHA256
+# Hash of the reviewed unsigned Core artifact published by macOS CI. The
+# dry-run planner rejects any structurally similar but different dylib.
+PRIVATE_PILOT_DYLIB_SHA256 = (
+    "bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff"
+)
 PRIVATE_PILOT_ADAPTER = "com.projectx.xinsta.pilot@456.0.0@1114925422"
 PRIVATE_PILOT_DISPLAY_NAME = "Xinsta"
 PRIVATE_PILOT_APP_GROUP_PREFIX = "group.com.projectx.xinsta.pilot"

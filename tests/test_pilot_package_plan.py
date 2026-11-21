@@ -17,6 +17,7 @@ from tests.ipa_fixtures import (
     CPU_X86_64,
     LC_ID_DYLIB,
     LC_LOAD_DYLIB,
+    LC_LOAD_WEAK_DYLIB,
     MH_DYLIB,
     MH_EXECUTE,
     base_entries,
@@ -75,8 +76,12 @@ def _dylib(*, file_type: int = MH_DYLIB, cpu_type: int | None = None, install_na
 def test_plan_is_deterministic_and_dry_run(tmp_path, monkeypatch) -> None:
     ipa, digest = _source_ipa(tmp_path)
     monkeypatch.setattr(planner, "PRIVATE_PILOT_SOURCE_SHA256", digest)
+    dylib_data = _dylib()
+    monkeypatch.setattr(
+        planner, "PRIVATE_PILOT_DYLIB_SHA256", hashlib.sha256(dylib_data).hexdigest()
+    )
     dylib = tmp_path / "libXinstaCore.dylib"
-    dylib.write_bytes(_dylib())
+    dylib.write_bytes(dylib_data)
 
     first = planner.build_pilot_package_plan(ipa, dylib)
     second = planner.build_pilot_package_plan(ipa, dylib)
@@ -114,22 +119,47 @@ def test_wrong_source_hash_is_rejected(tmp_path, monkeypatch) -> None:
     assert caught.value.code == "SOURCE_HASH_MISMATCH"
 
 
-def test_existing_core_load_command_is_rejected(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize("load_command", [LC_LOAD_DYLIB, LC_LOAD_WEAK_DYLIB])
+def test_existing_core_load_command_is_rejected(
+    tmp_path, monkeypatch, load_command
+) -> None:
     executable = build_macho(
         rpaths=("@executable_path/Frameworks",),
         dylibs=(
-            ("@rpath/libXinstaCore.dylib", LC_LOAD_DYLIB),
+            ("@rpath/libXinstaCore.dylib", load_command),
             ("/usr/lib/libSystem.B.dylib", LC_LOAD_DYLIB),
         ),
     )
     ipa, digest = _source_ipa(tmp_path, executable=executable)
     monkeypatch.setattr(planner, "PRIVATE_PILOT_SOURCE_SHA256", digest)
+    dylib_data = _dylib()
+    monkeypatch.setattr(
+        planner, "PRIVATE_PILOT_DYLIB_SHA256", hashlib.sha256(dylib_data).hexdigest()
+    )
     dylib = tmp_path / "libXinstaCore.dylib"
-    dylib.write_bytes(_dylib())
+    dylib.write_bytes(dylib_data)
 
     with pytest.raises(planner.PilotPlanError) as caught:
         planner.build_pilot_package_plan(ipa, dylib)
     assert caught.value.code == "SOURCE_CORE_LOAD_COMMAND_PRESENT"
+
+
+def test_duplicate_core_rpath_is_rejected(tmp_path, monkeypatch) -> None:
+    executable = build_macho(
+        rpaths=("@executable_path/Frameworks", "@executable_path/Frameworks")
+    )
+    ipa, digest = _source_ipa(tmp_path, executable=executable)
+    monkeypatch.setattr(planner, "PRIVATE_PILOT_SOURCE_SHA256", digest)
+    dylib_data = _dylib()
+    monkeypatch.setattr(
+        planner, "PRIVATE_PILOT_DYLIB_SHA256", hashlib.sha256(dylib_data).hexdigest()
+    )
+    dylib = tmp_path / "libXinstaCore.dylib"
+    dylib.write_bytes(dylib_data)
+
+    with pytest.raises(planner.PilotPlanError) as caught:
+        planner.build_pilot_package_plan(ipa, dylib)
+    assert caught.value.code == "SOURCE_RPATH_DUPLICATE"
 
 
 @pytest.mark.parametrize(
@@ -143,12 +173,28 @@ def test_existing_core_load_command_is_rejected(tmp_path, monkeypatch) -> None:
 def test_invalid_dylib_is_rejected(tmp_path, monkeypatch, kwargs, expected) -> None:
     ipa, digest = _source_ipa(tmp_path)
     monkeypatch.setattr(planner, "PRIVATE_PILOT_SOURCE_SHA256", digest)
+    dylib_data = _dylib(**kwargs)
+    monkeypatch.setattr(
+        planner, "PRIVATE_PILOT_DYLIB_SHA256", hashlib.sha256(dylib_data).hexdigest()
+    )
     dylib = tmp_path / "libXinstaCore.dylib"
-    dylib.write_bytes(_dylib(**kwargs))
+    dylib.write_bytes(dylib_data)
 
     with pytest.raises(planner.PilotPlanError) as caught:
         planner.build_pilot_package_plan(ipa, dylib)
     assert caught.value.code == expected
+
+
+def test_wrong_dylib_hash_is_rejected(tmp_path, monkeypatch) -> None:
+    ipa, digest = _source_ipa(tmp_path)
+    monkeypatch.setattr(planner, "PRIVATE_PILOT_SOURCE_SHA256", digest)
+    monkeypatch.setattr(planner, "PRIVATE_PILOT_DYLIB_SHA256", "0" * 64)
+    dylib = tmp_path / "libXinstaCore.dylib"
+    dylib.write_bytes(_dylib())
+
+    with pytest.raises(planner.PilotPlanError) as caught:
+        planner.build_pilot_package_plan(ipa, dylib)
+    assert caught.value.code == "DYLIB_HASH_MISMATCH"
 
 
 def test_cli_reports_fixed_error_without_path_echo(capsys) -> None:

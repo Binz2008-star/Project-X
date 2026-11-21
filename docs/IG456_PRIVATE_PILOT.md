@@ -67,12 +67,16 @@ resolved binding. Feature registries are per binding, and the diagnostic reports
 vice versa. No hook, swizzle, method replacement, or host class modification is
 implemented or enabled.
 
-Status of the Objective-C policy source at committed head
-`1c6395e42890be0d65c6f6a5099c3b0c6158fd64`: `VERIFIED` by macOS CI run
-`44909181721` — 114 Foundation assertions passed, 8 simulator XCTests passed,
-and the unsigned arm64 iOS 16.3 dylib passed structural verification. The
-production gate remains unchanged for all non-pilot identities: `NOT TESTED` in
-a real host, `VERIFIED` as source/test intent in this repository.
+Status of the Objective-C policy source: `VERIFIED` at its last macOS-CI-tested
+source commit `1c6395e42890be0d65c6f6a5099c3b0c6158fd64` by run `44909181721`
+— 114 Foundation assertions passed, 8 simulator XCTests passed, and the unsigned
+arm64 iOS 16.3 dylib passed structural verification. The branch was rebuilt at
+`1108a38f1a7beec4fc588b509cfa9b558cd236cf` in run `44911332215` with the same
+Objective-C source: 114 Foundation assertions, 8 simulator XCTests and artifact
+verification passed again. No Objective-C source has changed in later
+planner/docs commits. The production gate remains unchanged for all non-pilot
+identities: `NOT TESTED` in a real host, `VERIFIED` as source/test intent in
+this repository.
 
 ## Dry-run packaging planner
 
@@ -96,8 +100,11 @@ Verified against the pinned source and the downloaded CI artifact:
 `@executable_path/Frameworks`, `source.core_load_command_present = false`,
 all 14 nested bundles have signature metadata with none unsigned, no source App
 Groups, Keychain groups or associated-domains entitlement are declared, and no
-signature-verification claim is made. `dylib.sha256` equals
-`bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff`,
+signature-verification claim is made. The planner now pins the dylib itself to
+`PRIVATE_PILOT_DYLIB_SHA256 =
+bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff` and rejects a
+different hash with `DYLIB_HASH_MISMATCH`; it also rejects duplicate Core rpath
+commands and any Core load-command kind, not just `LC_LOAD_DYLIB`.
 `dylib.load_command_count = 21`, `dylib.dependencies = system_only`, and
 `dylib.signed = false`. The pinned `pilot_identity.display_name` is `Xinsta`,
 and the rpath step is marked `already_present` rather than proposing a duplicate
