@@ -116,11 +116,14 @@ Exit codes: `0` preflight passed, `2` preflight rejected, `1` unreadable/oversiz
 
 ## Verification
 
-Load-only policy increment on this development branch: local full pytest suite
+Load-only policy increment on code head
+`3e94db5918b73489f62da70e18b0d011c2536f6d`: local full pytest suite
 `308 passed, 30 skipped`; targeted preflight/authorization suites `166 passed`;
 legacy licensing `OK (7 tests)`; OpenAPI synchronization passed; `git diff
---check` clean. This increment is pending fresh CI and independent review; no
-runtime load evidence is claimed.
+--check` clean. GitHub Actions run `44856252376` passed on that head with
+`58` API tests, `2` staging guards, `87` analyzer tests, `166` preflight and
+authorization tests, `18` contract tests, `Ran 7 tests` for licensing, clean
+Alembic checks, and synchronized OpenAPI. No runtime load evidence is claimed.
 
 B9 correction and re-review set: `159 passed` for `tests/test_build_manager_preflight.py` together with `tests/test_build_manager_authorization.py` using the repository virtualenv on 2026-11-21; combined API/staging run `31 passed, 29 skipped`; `git diff --check` clean. CI on the earlier B9 head passed push run `44841872361` and PR run `44841879766`. The later re-review corrections and their final-head CI runs are recorded in the PR body.
 
