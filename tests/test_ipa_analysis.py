@@ -1132,3 +1132,62 @@ def test_cli_never_unlinks_the_output_target(tmp_path: Path, monkeypatch, capsys
     capsys.readouterr()
     assert output.is_file()
     assert not any(Path(item) == output for item in unlinked)
+
+
+def test_cli_preserves_input_when_temporary_path_is_replaced_during_publication(
+    tmp_path: Path, monkeypatch, capsys
+):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    before = path.read_bytes()
+    output = tmp_path / "report.json"
+    output.write_text("EXISTING-REPORT", encoding="utf-8")
+    real_link = cli_module.os.link
+
+    def swapping_link(source, target):
+        Path(source).unlink()
+        os.replace(path, source)
+        return real_link(source, target)
+
+    monkeypatch.setattr(cli_module.os, "link", swapping_link)
+
+    assert cli_main([str(path), "--json", str(output)]) == 2
+    captured = capsys.readouterr()
+    assert "OUTPUT_WRITE_FAILED" in captured.err
+    assert "Traceback" not in captured.out + captured.err
+    assert output.read_text(encoding="utf-8") == "EXISTING-REPORT"
+    assert not path.exists()
+    swapped = list(tmp_path.glob(".inspect-ipa-*"))
+    assert swapped
+    assert any(item.read_bytes() == before for item in swapped)
+
+
+def test_cli_output_parent_error_is_a_fixed_refusal(tmp_path: Path, capsys):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    output = tmp_path / "private-family-photos" / "missing-directory" / "report.json"
+
+    assert cli_main([str(path), "--json", str(output)]) == 2
+    captured = capsys.readouterr()
+    assert "OUTPUT_WRITE_FAILED" in captured.err
+    assert "private-family-photos" not in captured.out + captured.err
+    assert "Traceback" not in captured.out + captured.err
+
+
+def test_cli_suppresses_temporary_cleanup_errors(tmp_path: Path, monkeypatch, capsys):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    output = tmp_path / "report.json"
+    real_unlink = cli_module.Path.unlink
+    attempted: list[str] = []
+
+    def failing_unlink(self, *args, **kwargs):
+        attempted.append(str(self))
+        if self.name.startswith(".inspect-ipa-"):
+            raise OSError("cleanup denied")
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(cli_module.Path, "unlink", failing_unlink)
+
+    assert cli_main([str(path), "--json", str(output)]) == 0
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.out + captured.err
+    assert output.is_file()
+    assert any(Path(item).name.startswith(".inspect-ipa-") for item in attempted)

@@ -101,6 +101,8 @@ entirely. Both classic and ZIP64 end-of-central-directory records are parsed.
 | A7-R6 | Publication never unlinks the target: an existing report or symlink is refused, so no window exists between a collision check and a destructive unlink. | Existing-target, symlink, no-unlink tracer and publication-race tests. |
 | A7-R7 | All input-path I/O errors, not only `FileNotFoundError`, produce a fixed refusal without echoing the path or a traceback. | Private-directory CLI test. |
 | A7-R8 | Semantically invalid numeric limits (`0`, negative) produce fixed `INVALID_ARGUMENTS` instead of an uncaught `ValueError`. | Parametrised CLI limit tests. |
+| A7-R9 | Temporary-file cleanup removes only the inode captured from the original descriptor. A concurrent rename onto the temporary path is never unlinked, so the input archive survives even when the publication link fails. | Temporary-inode swapping race test that preserves the original archive bytes. |
+| A7-R10 | All temporary-file creation, write, link and cleanup `OSError`s reduce to fixed `OUTPUT_WRITE_FAILED`; output-parent failures no longer echo private paths or tracebacks. | Nonexistent private output directory and failing-cleanup tests. |
 
 Downstream consumers must accept schema `1.1`. No private field names, local paths or raw
 parser text are emitted by the new refusal codes.
