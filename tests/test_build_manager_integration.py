@@ -245,7 +245,7 @@ def test_cli_accepts_a_real_analyzer_report_without_echoing_private_paths(
 
 def test_current_and_legacy_report_schemas_are_accepted(tmp_path: Path) -> None:
     report = analyzer_report(owned_ipa(tmp_path, name="Schema.ipa"))
-    assert report["schema_version"] == "1.1"
+    assert report["schema_version"] == "1.2"
     assert evaluate(manifest_for(report), report).preflight_passed is True
 
     legacy = copy.deepcopy(report)

@@ -1,5 +1,7 @@
 #import "XinstaCompatibility.h"
 
+#import "XinstaIdentityPolicy.h"
+
 NSString * const XinstaAdapterIdentifierIG456 = @"com.burbn.instagram@456.0.0@1114925422";
 
 NSString * const XinstaCompatibilityReasonNotChecked = @"not_checked";
@@ -47,6 +49,14 @@ NSString * const XinstaCompatibilityReasonSymbolsUnavailable = @"symbols_unavail
     return @"1114925422";
 }
 
++ (NSString *)privatePilotBundleIdentifier {
+    return XinstaBundleIdentifierPrivatePilot;
+}
+
++ (NSString *)privatePilotAdapterIdentifier {
+    return XinstaAdapterIdentifierPrivatePilot;
+}
+
 + (NSString *)targetClassName {
     return @"IGProfileSheetTableViewController";
 }
@@ -87,17 +97,21 @@ NSString * const XinstaCompatibilityReasonSymbolsUnavailable = @"symbols_unavail
         return [self rejectedWithReasonCode:XinstaCompatibilityReasonMissingBundleIdentifier
                                       reason:@"Host bundle identifier is missing"];
     }
-    if (![bundleIdentifier isEqualToString:self.supportedBundleIdentifier]) {
+    BOOL production = [bundleIdentifier isEqualToString:self.supportedBundleIdentifier];
+    BOOL pilot = [XinstaIdentityPolicy isPilotBundleIdentifier:bundleIdentifier];
+    if (!production && !pilot) {
         return [self rejectedWithReasonCode:XinstaCompatibilityReasonBundleIdentifierMismatch
-                                      reason:@"Host bundle identifier does not match the Instagram reference"];
+                                      reason:@"Host bundle identifier is not an allowlisted adapter identity"];
     }
-    if (![version isEqualToString:self.supportedVersion]) {
+    NSString *expectedVersion = pilot ? XinstaPrivatePilotVersion : self.supportedVersion;
+    NSString *expectedBuild = pilot ? XinstaPrivatePilotBuild : self.supportedBuild;
+    if (![version isEqualToString:expectedVersion]) {
         return [self rejectedWithReasonCode:XinstaCompatibilityReasonVersionMismatch
-                                      reason:@"Host version does not match the 456.0.0 adapter"];
+                                      reason:@"Host version does not match the pinned adapter"];
     }
-    if (![build isEqualToString:self.supportedBuild]) {
+    if (![build isEqualToString:expectedBuild]) {
         return [self rejectedWithReasonCode:XinstaCompatibilityReasonBuildMismatch
-                                      reason:@"Host build does not match the 456.0.0 adapter"];
+                                      reason:@"Host build does not match the pinned adapter"];
     }
 
     NSMutableArray<NSString *> *required = [NSMutableArray array];
@@ -122,7 +136,7 @@ NSString * const XinstaCompatibilityReasonSymbolsUnavailable = @"symbols_unavail
     }
     return [[XinstaCompatibilityReport alloc] initWithSupported:YES
                                                       reasonCode:XinstaCompatibilityReasonAccepted
-                                                          reason:@"Metadata and required capabilities match the 456.0.0 adapter"
+                                                          reason:@"Metadata and required capabilities match the pinned adapter"
                                                  missingSymbols:@[]];
 }
 

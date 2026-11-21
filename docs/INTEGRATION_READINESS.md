@@ -6,7 +6,7 @@ This stacked increment converges the read-only IPA analyzer from Draft PR #7 wit
 
 ## What this increment proves
 
-- The analyzer's current `schema_version = "1.1"` report is passed directly to `project_x.buildmanager.evaluate()` without reshaping or hand-editing. Legacy `1.0` reports are also accepted; unknown schemas are rejected without echoing the value.
+- The analyzer's current `schema_version = "1.2"` report is passed directly to `project_x.buildmanager.evaluate()` without reshaping or hand-editing. Legacy `1.0` and `1.1` reports are also accepted; unknown schemas are rejected without echoing the value.
 - The owner manifest derived from that report's identity and SHA-256 passes the gate. Appending bytes to the inspected archive changes its hash and breaks the binding.
 - The resulting plan is still `mode = dry_run`, `execution_permitted = false`, `status = READY_FOR_INDEPENDENT_REVIEW`, with advisory-only authorization (`cryptographically_verified = false`).
 - Analyzer finding codes emitted by realistic structural scenarios are in the preflight allowlist, including A7 codes; severities are recomputed from the allowlist and mismatches fail closed.

@@ -2,11 +2,15 @@
 from __future__ import annotations
 
 import plistlib
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 
 from .safety import SafeArchive, implied_directories
 
 MAX_INFO_PLIST_BYTES = 4 * 1024 * 1024
+MAX_URL_SCHEMES = 64
+MAX_URL_SCHEME_LENGTH = 128
+_URL_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*$")
 
 _EXTENSION_SUFFIX = ".appex/"
 _FRAMEWORK_SUFFIX = ".framework/"
@@ -65,6 +69,32 @@ def _supported_platforms(value: object) -> tuple[str, ...]:
     return tuple(platforms)
 
 
+def _url_schemes(value: object) -> tuple[str, ...]:
+    """Read bounded, output-safe CFBundleURLTypes scheme declarations."""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise MalformedInfoPlistError("CFBundleURLTypes must be a list when present")
+    schemes: set[str] = set()
+    for entry in value:
+        if not isinstance(entry, dict):
+            raise MalformedInfoPlistError("CFBundleURLTypes entries must be dictionaries")
+        declared = entry.get("CFBundleURLSchemes")
+        if declared is None:
+            continue
+        if not isinstance(declared, list):
+            raise MalformedInfoPlistError("CFBundleURLSchemes must be a list when present")
+        for scheme in declared:
+            if not isinstance(scheme, str) or not _URL_SCHEME_RE.match(scheme):
+                raise MalformedInfoPlistError("CFBundleURLSchemes contains an invalid scheme")
+            if len(scheme) > MAX_URL_SCHEME_LENGTH:
+                raise MalformedInfoPlistError("CFBundleURLSchemes contains an oversized scheme")
+            schemes.add(scheme)
+            if len(schemes) > MAX_URL_SCHEMES:
+                raise MalformedInfoPlistError("CFBundleURLSchemes contains too many schemes")
+    return tuple(sorted(schemes))
+
+
 @dataclass(frozen=True)
 class AppIdentity:
     bundle_id: str | None
@@ -76,6 +106,7 @@ class AppIdentity:
     executable: str | None
     device_families: tuple[int, ...]
     supported_platforms: tuple[str, ...]
+    url_schemes: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict:
         return {
@@ -88,6 +119,7 @@ class AppIdentity:
             "executable": self.executable,
             "device_families": list(self.device_families),
             "supported_platforms": list(self.supported_platforms),
+            "url_schemes": list(self.url_schemes),
         }
 
 
@@ -167,6 +199,7 @@ def identity_from_info(info: dict) -> AppIdentity:
         executable=_optional_string(info, "CFBundleExecutable"),
         device_families=_device_families(info.get("UIDeviceFamily")),
         supported_platforms=_supported_platforms(info.get("CFBundleSupportedPlatforms")),
+        url_schemes=_url_schemes(info.get("CFBundleURLTypes")),
     )
 
 

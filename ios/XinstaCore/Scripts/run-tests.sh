@@ -22,6 +22,7 @@ CLANG="$(xcrun --sdk macosx -f clang)"
   "$ROOT/Sources/Core/XinstaFeature.m" \
   "$ROOT/Sources/Core/XinstaFeatureRegistry.m" \
   "$ROOT/Sources/Core/XinstaCompatibility.m" \
+  "$ROOT/Sources/Core/XinstaIdentityPolicy.m" \
   "$ROOT/Sources/Core/XinstaHostMetadata.m" \
   "$ROOT/Sources/Core/XinstaSettingsDataSource.m" \
   "$ROOT/Sources/Adapter/XinstaIG456Adapter.m" \

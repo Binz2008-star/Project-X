@@ -44,7 +44,7 @@ Keys must match exactly. `owner_authorized` must be boolean `true`; wildcard cha
 
 ### Inspection report
 
-The report is the versioned `IpaInspectionReport` defined by the read-only analysis engine. `schema_version` `1.0` and `1.1` are both accepted; `1.1` adds typed dependency references and fix codes without changing the fields consumed here. Unknown, missing or malformed schema values are rejected with `REPORT_INVALID` and the raw value is never echoed. Only these fields are consumed: `artifact.sha256`, `identity.{bundle_id,name,display_name,version,build_number,minimum_os,executable}`, `macho.{slice_count,slices[]}`, `signing.verification`, `dependencies.{unresolved_rpath_dependencies,duplicate_framework_basenames}`, `findings[].{code,severity}`, and `interpretation.malware_verdict`. Everything else is ignored so that provisioning-profile details, local names, and other private metadata cannot leak into the plan.
+The report is the versioned `IpaInspectionReport` defined by the read-only analysis engine. `schema_version` `1.0`, `1.1` and `1.2` are accepted; `1.1` adds typed dependency references and fix codes, and `1.2` adds bounded URL-scheme and provisioning-profile group summaries for the private-pilot isolation policy. Unknown, missing or malformed schema values are rejected with `REPORT_INVALID` and the raw value is never echoed. Only these fields are consumed: `artifact.sha256`, `identity.{bundle_id,name,display_name,version,build_number,minimum_os,executable,url_schemes}`, `macho.{slice_count,slices[]}`, `bundles.extensions[].bundle_id`, `signing.{provisioning_profile_present,verification,provisioning_profile.{entitlement_keys,app_groups,keychain_access_groups}}`, `dependencies.{unresolved_rpath_dependencies,duplicate_framework_basenames}`, `findings[].{code,severity}`, and `interpretation.malware_verdict`. Group and scheme values are validated and compared against the declaration; their raw values are not copied into the dry-run plan. Everything else is ignored so that local names and other private metadata cannot leak into the plan.
 
 Report hash format is validated identically to the manifest. Finding codes must come from the fixed `KNOWN_ANALYSIS_CODES` allowlist; arbitrary strings are rejected before any result is built. This prevents a crafted code containing a path, secret, or control character from being echoed into `review_findings` or a blocker detail. The allowlist must be updated deliberately when the analyzer contract changes, which is fail-closed by design.
 
@@ -58,9 +58,11 @@ Every known finding code has an entry in `EXPECTED_SEVERITIES`, including the A7
 | Report shape, unsupported schema, unknown finding code, malformed hash | `REPORT_INVALID` |
 | Unsafe identity-like text (path, control, bidi, secret-like, overlong) | `UNSAFE_IDENTITY_STRING` |
 | Report finding severity disagrees with its known code | `REPORT_INCONSISTENT` |
-| Any bundle other than an owned test package or the pinned load-only proof identity | `BUNDLE_ID_NOT_ALLOWED` |
+| Any bundle other than an owned test package, the pinned load-only proof identity, or the private pilot | `BUNDLE_ID_NOT_ALLOWED` |
 | Pinned proof has the wrong rights basis or an unpinned hash | `RIGHTS_BASIS_NOT_ALLOWED_FOR_LOAD_PROOF`, `SHA256_NOT_PINNED_FOR_LOAD_PROOF` |
-| Owned test package declares the load-only rights basis | `RIGHTS_BASIS_NOT_ALLOWED_FOR_OWNED_TEST` |
+| Private pilot has the wrong rights basis, identity, source hash, adapter, or artifact hash | `RIGHTS_BASIS_NOT_ALLOWED_FOR_PRIVATE_PILOT`, `PRIVATE_PILOT_IDENTITY_NOT_PINNED`, `PRIVATE_PILOT_SOURCE_NOT_PINNED`, `PRIVATE_PILOT_ADAPTER_NOT_PINNED`, `PRIVATE_PILOT_ARTIFACT_NOT_DISTINCT` |
+| Private pilot declares unsafe coexistence, URL schemes, entitlements, groups, or extensions | `PRIVATE_PILOT_COEXISTENCE_DECLARATION_INVALID`, `PRIVATE_PILOT_*_NOT_ALLOWED`, `PRIVATE_PILOT_*_MISMATCH`, `PRIVATE_PILOT_ENTITLEMENT_MISSING` |
+| Owned test package declares the load-only or private-pilot rights basis | `RIGHTS_BASIS_NOT_ALLOWED_FOR_OWNED_TEST` |
 | Identity or hash differs from the manifest | `BUNDLE_ID_MISMATCH`, `VERSION_MISMATCH`, `BUILD_MISMATCH`, `SHA256_MISMATCH` |
 | Deployment target below iOS 16.3 | `MINIMUM_OS_TOO_LOW` |
 | Missing/invalid main executable, non-arm64-family, or encrypted slice | `MAIN_EXECUTABLE_*` |
@@ -73,21 +75,32 @@ Warnings and duplicate framework basenames are retained as `review_findings`; on
 
 Architecture acceptance is strict: only `arm64` and `arm64e` slices are valid. The legacy string alias `arm64v8` and CPU subtype `1` are normalised to `arm64`; subtype `2` maps to `arm64e`. A subtype never promotes an explicitly unsupported architecture (`x86_64`, `armv7`, unknown strings, non-strings), and one unsupported slice blocks a mixed-slice report. No IPA bytes are read by preflight; tests build minimal real Mach-O headers locally.
 
-The owned-test allowlist contains only `demo.owned`, the fictional/owned test product used throughout this repository. A separate, narrowly pinned planning exception allows `com.burbn.instagram` version `456.0.0` build `1114925422` only when the manifest declares `load-only-proof` and pins artifact SHA-256 `665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131`. This exception was scoped by the owner for a private load-only device proof; it does not establish commercial rights, permit hooks or host UI verification, or make the plan executable. All other third-party bundle identifiers remain rejected unconditionally. See `docs/IG456_LOAD_PROOF_RUNBOOK.md`.
+The owned-test allowlist contains only `demo.owned`, the fictional/owned test product used throughout this repository. A separate, narrowly pinned planning exception allows `com.burbn.instagram` version `456.0.0` build `1114925422` only when the manifest declares `load-only-proof` and pins artifact SHA-256 `665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131`. This exception was scoped by the owner for a private load-only device proof; it does not establish commercial rights, permit hooks or host UI verification, or make the plan executable. See `docs/IG456_LOAD_PROOF_RUNBOOK.md`.
+
+A second development-only exception allows `com.projectx.xinsta.pilot` version
+`456.0.0` build `1114925422` with rights basis `private-pilot-installability`.
+Its declaration must pin the same source SHA-256, a distinct output hash, adapter
+`com.projectx.xinsta.pilot@456.0.0@1114925422`, the single URL scheme
+`xinsta-pilot-loadproof`, pilot-only App Groups/extension identifiers, no custom
+Keychain groups, and coexistence flags `replace_existing_app = false` and
+`preserve_original_data = true`. It is dry-run-only and does not weaken the
+production gate or prove device coexistence. See
+`docs/IG456_PRIVATE_PILOT.md`. All other third-party bundle identifiers remain
+rejected unconditionally.
 
 ## Dry-run plan semantics
 
 A passing result has `preflight_passed = true` and a plan with:
 
 - `mode = "dry_run"`, `execution_permitted = false`, `status = "READY_FOR_INDEPENDENT_REVIEW"`.
-- `purpose = "owned_test_package"` or, for the pinned exception, `purpose = "load_only_proof"`.
+- `purpose = "owned_test_package"`, `purpose = "load_only_proof"`, or `purpose = "private_pilot_installability"`.
 - `authorization.verification = "advisory_declaration_only"` and `authorization.cryptographically_verified = false`. The unsigned declaration is never presented as verified authorization.
 - Exact package identity and SHA-256 copied from the validated inputs only.
-- `@rpath/libXinstaCore.dylib` recorded as the expected install name, with `hook = false` and `swizzle = false`. The pinned proof uses compatibility adapter `com.burbn.instagram@456.0.0@1114925422`; this is an identifier, not a runtime capability.
-- Ordered steps marked `passed`, `planned`, or `blocked`. The declaration check is `check_owner_declaration` (not a verification step). Staging the dylib and adding a loader rpath are *planned* and require a separate installer review; codesigning, device registration/install, in-host load-marker collection for the pinned proof, and in-host X Settings verification are *blocked* pending credentials, verified authorization and an approved hook path.
+- `@rpath/libXinstaCore.dylib` recorded as the expected install name, with `hook = false` and `swizzle = false`. The pinned proof uses `com.burbn.instagram@456.0.0@1114925422` and the pilot uses `com.projectx.xinsta.pilot@456.0.0@1114925422`; these are identifiers, not runtime capabilities.
+- Ordered steps marked `passed`, `planned`, or `blocked`. The declaration check is `check_owner_declaration` (not a verification step). Staging the dylib and adding a loader rpath are *planned* and require a separate installer review; codesigning, device registration/install, in-host load-marker collection, in-host X Settings verification, and the pilot's unique-bundle isolation check are *blocked* pending credentials, verified authorization and an approved hook path.
 - Credential names listed as `provided = false`, `secret = true`. No credential value, local path, or provisioning-profile metadata appears in the output.
 
-Plan schema remains `1.0`; the load-only change is additive. Existing consumers must ignore the new `purpose` field and the extra blocked step, and no previously emitted field was removed or retyped. If a strict external JSON-schema consumer exists, validate this additive shape before rollout.
+Plan schema remains `1.0`; the load-only and private-pilot changes are additive. Existing consumers must ignore the new `purpose` values, the pilot adapter identifier, and the extra blocked steps, and no previously emitted field was removed or retyped. Pilot plans also carry a limitation stating that the distinct bundle identity does not weaken the production gate or prove coexistence. If a strict external JSON-schema consumer exists, validate this additive shape before rollout.
 
 The output is byte-stable for identical inputs: no timestamps, no absolute paths, and no unordered sets in emitted lists.
 
@@ -128,6 +141,17 @@ authorization tests, `18` contract tests, `Ran 7 tests` for licensing, clean
 Alembic checks, and synchronized OpenAPI. The documentation-only follow-up head
 `114b3b3ac524957982f202b5e580199ba9038cc5` passed CI run `44856414354` with
 the same counts. No runtime load evidence is claimed.
+
+### Private-pilot policy increment (local evidence only)
+
+On the uncommitted working tree of `feature/ig456-private-pilot-identity`, after
+the analyzer schema `1.2` and pilot isolation additions: full local pytest
+`345 passed, 29 skipped`; focused analyzer/preflight/contract suites
+`290 passed`; legacy licensing `OK (7 tests)`; OpenAPI synchronization passed;
+`git diff --check` clean apart from Git's LF-to-CRLF warnings on checked-out
+scripts. No commit head, CI run, macOS Core build, signing operation, install,
+or runtime evidence exists for this increment: each is `NOT TESTED` until
+recorded separately. See `docs/IG456_PRIVATE_PILOT.md`.
 
 ### Independent load-policy review
 
@@ -174,7 +198,7 @@ No merge or deployment is implied by this approval. PR #9 remains DRAFT pending 
 | B9-3 | FIXED | Analyzer-to-preflight tests remain only in PR #10. |
 | B9-4 | FIXED | Bounded, output-safe identity strings with fixed rejection codes. |
 | B9-5 | FIXED | arm64/arm64e normalization and subtype `1` handling; unsupported architectures blocked. |
-| B9-6 | FIXED | Expected-severity map covers schema `1.0`/`1.1` and A7 codes; report severities not trusted. |
+| B9-6 | FIXED | Expected-severity map covers schemas `1.0`/`1.1`/`1.2` and A7 codes; report severities not trusted. |
 | B9-7 | FIXED | Bounded JSON CLI input with iterative pre-scan and fixed errors. |
 | B9-8 | FIXED | PR #9 base retargeted to `main`; duplicated Xinsta Core commits removed from the PR diff without history rewrite. |
 
@@ -190,7 +214,7 @@ The fresh independent review of the B9 head returned `REQUEST CHANGES`. Each fin
 | B9-R4 | FIXED | Verifier-raised codes are accepted only from the fixed allowlist; path-like or arbitrary codes reduce to `AUTHORIZATION_VERIFIER_FAILED`. |
 | B9-R5 | FIXED | Verifier-supplied method, signer and provenance values are string-checked before allowlist membership. |
 | B9-R6 | FIXED | Verification documentation no longer claims the branch was unpushed and cites the actual green CI runs. |
-| B9-R7 | FIXED | Documentation states that both report schemas `1.0` and `1.1` are accepted. |
+| B9-R7 | FIXED | Documentation states that report schemas `1.0`, `1.1`, and `1.2` are accepted. |
 
 ## Security and compatibility considerations
 

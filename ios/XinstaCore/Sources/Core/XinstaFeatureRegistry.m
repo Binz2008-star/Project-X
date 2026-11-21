@@ -1,39 +1,64 @@
 #import "XinstaFeatureRegistry.h"
 
+#import "XinstaIdentityPolicy.h"
+
 static NSString *const XinstaFeatureOverrideKey = @"xinsta.core.featureOverrides";
 
 @interface XinstaFeatureRegistry ()
 @property (nonatomic, strong) NSUserDefaults *userDefaults;
++ (instancetype)sharedRegistryForKnownAdapterIdentifier:(NSString *)adapterIdentifier;
 @end
 
 @implementation XinstaFeatureRegistry
 
 + (instancetype)sharedRegistry {
-    static XinstaFeatureRegistry *registry;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        NSArray *features = @[
-            [[XinstaFeature alloc] initWithIdentifier:@"info"
-                                                title:@"Build Information"
-                                          description:@"Shows the verified version and adapter state."
-                                     enabledByDefault:YES
-                                    adapterIdentifier:XinstaAdapterIdentifierIG456],
-            [[XinstaFeature alloc] initWithIdentifier:@"demo.toggle"
-                                                title:@"Demo Option"
-                                          description:@"Harmless local toggle used to validate registry persistence."
-                                     enabledByDefault:NO
-                                    adapterIdentifier:XinstaAdapterIdentifierIG456],
-            [[XinstaFeature alloc] initWithIdentifier:@"accessibility"
-                                                title:@"Accessibility Labels"
-                                          description:@"Reserved for owned enhancements; no effect in this increment."
-                                     enabledByDefault:YES
-                                    adapterIdentifier:XinstaAdapterIdentifierIG456],
-        ];
-        registry = [[self alloc] initWithFeatures:features
-                                      userDefaults:[NSUserDefaults standardUserDefaults]
-                                 adapterIdentifier:XinstaAdapterIdentifierIG456];
-    });
-    return registry;
+    return [self sharedRegistryForKnownAdapterIdentifier:XinstaAdapterIdentifierIG456];
+}
+
++ (nullable instancetype)sharedRegistryForAdapterIdentifier:(nullable NSString *)adapterIdentifier {
+    NSString *key = [adapterIdentifier copy];
+    BOOL knownBinding =
+        [key isEqualToString:XinstaAdapterIdentifierIG456] ||
+        [key isEqualToString:XinstaAdapterIdentifierPrivatePilot];
+    if (!knownBinding) {
+        return nil;
+    }
+    return [self sharedRegistryForKnownAdapterIdentifier:key];
+}
+
++ (instancetype)sharedRegistryForKnownAdapterIdentifier:(NSString *)adapterIdentifier {
+    static NSMutableDictionary<NSString *, XinstaFeatureRegistry *> *registries;
+    @synchronized (self) {
+        if (!registries) {
+            registries = [NSMutableDictionary dictionary];
+        }
+        NSString *key = [adapterIdentifier copy];
+        XinstaFeatureRegistry *registry = registries[key];
+        if (!registry) {
+            NSArray *features = @[
+                [[XinstaFeature alloc] initWithIdentifier:@"info"
+                                                    title:@"Build Information"
+                                              description:@"Shows the verified version and adapter state."
+                                         enabledByDefault:YES
+                                        adapterIdentifier:key],
+                [[XinstaFeature alloc] initWithIdentifier:@"demo.toggle"
+                                                    title:@"Demo Option"
+                                              description:@"Harmless local toggle used to validate registry persistence."
+                                         enabledByDefault:NO
+                                        adapterIdentifier:key],
+                [[XinstaFeature alloc] initWithIdentifier:@"accessibility"
+                                                    title:@"Accessibility Labels"
+                                              description:@"Reserved for owned enhancements; no effect in this increment."
+                                         enabledByDefault:YES
+                                        adapterIdentifier:key],
+            ];
+            registry = [[self alloc] initWithFeatures:features
+                                          userDefaults:[NSUserDefaults standardUserDefaults]
+                                     adapterIdentifier:key];
+            registries[key] = registry;
+        }
+        return registry;
+    }
 }
 
 - (instancetype)initWithFeatures:(NSArray<XinstaFeature *> *)features

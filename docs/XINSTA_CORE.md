@@ -13,10 +13,12 @@ install any Instagram application, and it performs **no method swizzling**.
 - The owner-provided reference IPA was read only through the protected
   `SafeArchive` tooling. No IPA binary, extracted payload, certificate, or
   provisioning profile is stored in this repository.
-- The adapter is metadata-only. It rejects a host unless **all** of the
-  following match: bundle identifier `com.burbn.instagram`, version `456.0.0`,
-  build `1114925422`, and runtime visibility of every required Objective-C name.
-  A pass changes only a status value; it does not modify any Instagram class.
+- The adapter is metadata-only. It accepts only two exact identities: the
+  production reference `com.burbn.instagram` / `456.0.0` / `1114925422`, or the
+  development-only private pilot `com.projectx.xinsta.pilot` / `456.0.0` /
+  `1114925422`. Both also require runtime visibility of every required
+  Objective-C name. Every other identity is rejected. A pass changes only a
+  status value; it does not modify any host class.
 - Every feature declares the adapter it is bound to. Features for another
   adapter are filtered out, cannot be toggled, and cannot be presented.
 - `compatibilityAccepted == YES` means “the exact host metadata and symbols
@@ -34,6 +36,7 @@ ios/XinstaCore/
       XinstaFeatureRegistry.h/.m      # adapter-scoped defaults + explicit overrides
       XinstaHostMetadata.h/.m         # injectable bundle metadata value object
       XinstaCompatibility.h/.m        # identity/version/build/target gate
+      XinstaIdentityPolicy.h/.m       # exact production/pilot binding allowlist
       XinstaSettingsDataSource.h/.m   # Foundation-only settings model
     Adapter/
       XinstaIG456Adapter.h/.m         # 456.0.0-specific read-only checks
@@ -249,14 +252,32 @@ presentation inside Instagram, account login, redistribution, merge, or any
 repository-side execution. The Build Manager exception is a dry-run planning
 allowlist only; `execution_permitted` remains `false`.
 
+## Development-only private-pilot identity
+
+A second, narrowly scoped identity is defined for coexistence planning. It maps
+`com.projectx.xinsta.pilot` / `456.0.0` / `1114925422` to
+`com.projectx.xinsta.pilot@456.0.0@1114925422` through `XinstaIdentityPolicy`.
+The production adapter identifier is unchanged, every other identity is
+rejected, and each accepted binding has its own feature registry. The diagnostic
+reports `binding_mismatch` if a pilot adapter is paired with production features
+or the reverse. No hooks or swizzles are enabled.
+
+The private pilot is development-only. It does not weaken the production gate,
+does not modify the installed Instagram app, and does not prove coexistence or
+device-load behavior. Its Build Manager path is dry-run-only; signing,
+installation, isolation checks, and runtime load checks remain blocked. See
+`docs/IG456_PRIVATE_PILOT.md` for the identity table, Windows host findings,
+candidate procedure, evidence gate, and rollback plan. Status on this head:
+`NOT TESTED`.
+
 ## Verified vs unverified
 
 - Verified: read-only symbol and bundle presence in the exact reference IPA;
   unsigned dylib compilation; the Foundation and simulator assertions reported
   in the recorded CI runs; fail-closed artifact structure.
-- Verified only after the private runbook is executed and independently
-  reviewed: dylib load in the Instagram process. No such evidence exists on
-  this head.
+- Verified only after the private load-proof or pilot runbook is executed and
+  independently reviewed: dylib load in the target process. No such evidence
+  exists on this head, and unique-bundle coexistence remains `NOT TESTED`.
 - Unverified and out of scope here: runtime swizzling, hooking, presentation of
   X Settings from Instagram UI, feature behavior, account use, and commercial
   redistribution.

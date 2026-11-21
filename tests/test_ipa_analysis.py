@@ -49,6 +49,7 @@ from tests.ipa_fixtures import (
     base_entries,
     build_macho,
     build_universal,
+    owned_info,
     write_ipa,
 )
 
@@ -88,6 +89,36 @@ def test_identity_hash_and_architecture(demo_ipa: Path):
 
     assert [s.arch for s in report.macho_slices] == ["arm64"]
     assert report.macho_slices[0].file_type_name == "MH_EXECUTE"
+
+
+def test_url_schemes_are_sorted_bounded_and_output_safe(tmp_path: Path):
+    info = owned_info()
+    info["CFBundleURLTypes"] = [
+        {"CFBundleURLSchemes": ["pilot-b", "pilot-a"]},
+        {"CFBundleURLSchemes": ["pilot-a"]},
+    ]
+    report = inspect_ipa(write_ipa(tmp_path / "Schemes.ipa", base_entries(info=info)))
+
+    assert report.identity.url_schemes == ("pilot-a", "pilot-b")
+    assert report.to_dict()["identity"]["url_schemes"] == ["pilot-a", "pilot-b"]
+
+
+@pytest.mark.parametrize(
+    "schemes",
+    [
+        ["not a scheme"],
+        ["1pilot"],
+        ["x" * 129],
+        [f"scheme-{index}" for index in range(65)],
+    ],
+)
+def test_invalid_url_schemes_fail_closed(tmp_path: Path, schemes: list[str]):
+    info = owned_info()
+    info["CFBundleURLTypes"] = [{"CFBundleURLSchemes": schemes}]
+    path = write_ipa(tmp_path / "BadSchemes.ipa", base_entries(info=info))
+
+    with pytest.raises(MalformedInfoPlistError):
+        inspect_ipa(path)
 
 
 def test_report_is_json_serialisable_with_versioned_schema(demo_ipa: Path):
@@ -821,6 +852,56 @@ def test_valid_provisioning_profile_summary_uses_accurate_field_names(tmp_path: 
     assert "app_signature_file_count" not in signing
     assert "nested_bundles_signed" not in signing
     assert signing["code_signature_entry_count"] == 1
+
+
+def test_profile_entitlement_groups_are_sorted_and_output_safe(tmp_path: Path):
+    plist = plistlib.dumps(
+        {
+            "Name": "Pilot Profile",
+            "Entitlements": {
+                "application-identifier": "TEAM123.com.projectx.xinsta.pilot",
+                "com.apple.security.application-groups": [
+                    "group.com.projectx.xinsta.pilot.b",
+                    "group.com.projectx.xinsta.pilot.a",
+                ],
+                "keychain-access-groups": [],
+            },
+        },
+        fmt=plistlib.FMT_XML,
+    )
+    entries = base_entries()
+    entries[APP + "embedded.mobileprovision"] = b"CMS-header" + plist + b"CMS-footer"
+    report = inspect_ipa(write_ipa(tmp_path / "PilotProfile.ipa", entries))
+
+    assert report.signing.provisioning_profile is not None
+    profile = report.to_dict()["signing"]["provisioning_profile"]
+    assert profile["app_groups"] == [
+        "group.com.projectx.xinsta.pilot.a",
+        "group.com.projectx.xinsta.pilot.b",
+    ]
+    assert profile["keychain_access_groups"] == []
+    assert "application-identifier" in profile["entitlement_keys"]
+
+
+@pytest.mark.parametrize(
+    "groups",
+    [
+        "group.com.projectx.xinsta.pilot",
+        ["not a group"],
+        [123],
+    ],
+)
+def test_malformed_profile_groups_fail_closed(tmp_path: Path, groups):
+    plist = plistlib.dumps(
+        {"Entitlements": {"com.apple.security.application-groups": groups}},
+        fmt=plistlib.FMT_XML,
+    )
+    entries = base_entries()
+    entries[APP + "embedded.mobileprovision"] = b"CMS-header" + plist + b"CMS-footer"
+    report = inspect_ipa(write_ipa(tmp_path / "BadGroups.ipa", entries))
+
+    assert finding(report, "PROVISIONING_PROFILE_UNREADABLE") is not None
+    assert report.signing.provisioning_profile is None
 
 
 @pytest.mark.parametrize(

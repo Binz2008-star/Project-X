@@ -3,8 +3,8 @@
 Inputs are limited to two JSON documents:
 
 * an unsigned owner declaration manifest (advisory only); and
-* an ``IpaInspectionReport`` (``schema_version`` 1.0) produced by the read-only
-  analysis engine.
+* an ``IpaInspectionReport`` (``schema_version`` 1.0, 1.1, or 1.2) produced by
+  the read-only analysis engine.
 
 This module never opens an IPA, never extracts, writes, signs, or relocates a
 bundle, never reads credentials, and never contacts a device or remote service.
@@ -21,9 +21,10 @@ from typing import Any
 
 PLAN_SCHEMA_VERSION = "1.0"
 MANIFEST_SCHEMA_VERSION = "1.0"
-# Report 1.1 adds typed dependency references and fix codes; the consumed
-# fields are unchanged, so both versions are accepted with the same checks.
-ACCEPTED_REPORT_SCHEMA_VERSIONS = frozenset({"1.0", "1.1"})
+# Report 1.1 adds typed dependency references and fix codes. Report 1.2 adds
+# bounded URL-scheme and provisioning-profile group summaries for the private
+# pilot policy. All versions are validated with version-appropriate fields.
+ACCEPTED_REPORT_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2"})
 
 CORE_INSTALL_NAME = "@rpath/libXinstaCore.dylib"
 MINIMUM_IOS = (16, 3)
@@ -42,8 +43,35 @@ LOAD_ONLY_PROOF_SHA256 = (
     "665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131"
 )
 LOAD_ONLY_PROOF_ADAPTER = "com.burbn.instagram@456.0.0@1114925422"
+
+# Development-only private pilot. It is a distinct application identity, never a
+# relaxation of the production Instagram gate. The source hash proves the pilot
+# is derived from the exact inspected Instagram artifact; the pilot artifact hash
+# must be different. Signing, installation and device actions stay blocked.
+PRIVATE_PILOT_RIGHTS_BASIS = "private-pilot-installability"
+PRIVATE_PILOT_BUNDLE_ID = "com.projectx.xinsta.pilot"
+PRIVATE_PILOT_IDENTITY = ("com.projectx.xinsta.pilot", "456.0.0", "1114925422")
+PRIVATE_PILOT_SOURCE_SHA256 = LOAD_ONLY_PROOF_SHA256
+PRIVATE_PILOT_ADAPTER = "com.projectx.xinsta.pilot@456.0.0@1114925422"
+PRIVATE_PILOT_APP_GROUP_PREFIX = "group.com.projectx.xinsta.pilot"
+PRIVATE_PILOT_EXTENSION_PREFIX = "com.projectx.xinsta.pilot."
+PRIVATE_PILOT_URL_SCHEME = "xinsta-pilot-loadproof"
+PRIVATE_PILOT_ALLOWED_ENTITLEMENT_KEYS = frozenset(
+    {
+        "application-identifier",
+        "get-task-allow",
+        "com.apple.security.application-groups",
+        "keychain-access-groups",
+    }
+)
+PRIVATE_PILOT_REQUIRED_ENTITLEMENT_KEYS = frozenset(
+    {"application-identifier", "get-task-allow", "com.apple.security.application-groups"}
+)
+
 ALLOWED_BUNDLE_IDS = frozenset({"demo.owned"})
-ALLOWED_RIGHTS_BASIS = frozenset({OWNED_TEST_RIGHTS_BASIS, LOAD_ONLY_PROOF_RIGHTS_BASIS})
+ALLOWED_RIGHTS_BASIS = frozenset(
+    {OWNED_TEST_RIGHTS_BASIS, LOAD_ONLY_PROOF_RIGHTS_BASIS, PRIVATE_PILOT_RIGHTS_BASIS}
+)
 ALLOWED_ARCHITECTURES = frozenset({"arm64", "arm64e"})
 
 # Bounded, output-safe identity text. Rejections are reported with fixed codes
@@ -148,6 +176,20 @@ _MANIFEST_KEYS = frozenset(
         "rights_basis",
     }
 )
+_OPTIONAL_MANIFEST_KEYS = frozenset({"private_pilot"})
+_ALLOWED_MANIFEST_KEYS = _MANIFEST_KEYS | _OPTIONAL_MANIFEST_KEYS
+_PRIVATE_PILOT_KEYS = frozenset(
+    {
+        "source_sha256",
+        "adapter_identifier",
+        "app_groups",
+        "keychain_access_groups",
+        "url_schemes",
+        "extension_bundle_ids",
+        "replace_existing_app",
+        "preserve_original_data",
+    }
+)
 _IDENTITY_KEYS = frozenset({"bundle_id", "version", "build_number"})
 
 _BLK = "blocker"
@@ -179,6 +221,20 @@ class Finding:
 
 
 @dataclass(frozen=True)
+class PrivatePilotDeclaration:
+    """Narrow, output-safe declaration for a coexisting development variant."""
+
+    source_sha256: str
+    adapter_identifier: str
+    app_groups: tuple[str, ...]
+    keychain_access_groups: tuple[str, ...]
+    url_schemes: tuple[str, ...]
+    extension_bundle_ids: tuple[str, ...]
+    replace_existing_app: bool
+    preserve_original_data: bool
+
+
+@dataclass(frozen=True)
 class AuthorizationManifest:
     """Owner declaration that a specific, already-inspected package is eligible."""
 
@@ -188,6 +244,7 @@ class AuthorizationManifest:
     build_number: str
     expected_sha256: str
     rights_basis: str
+    private_pilot: PrivatePilotDeclaration | None = None
 
     @classmethod
     def from_dict(cls, value: Any) -> "AuthorizationManifest":
@@ -195,9 +252,9 @@ class AuthorizationManifest:
         if data.get("schema_version") != MANIFEST_SCHEMA_VERSION:
             raise PreflightInputError("manifest.schema_version must be '1.0'")
         keys = frozenset(data)
-        if keys != _MANIFEST_KEYS:
-            missing_count = len(_MANIFEST_KEYS - keys)
-            unknown_count = len(keys - _MANIFEST_KEYS)
+        missing_count = len(_MANIFEST_KEYS - keys)
+        unknown_count = len(keys - _ALLOWED_MANIFEST_KEYS)
+        if missing_count or unknown_count:
             # Never echo unknown key names: they are attacker-controlled and
             # could contain a path, a secret, or control characters.
             raise PreflightInputError(
@@ -237,6 +294,50 @@ class AuthorizationManifest:
         if rights_basis not in ALLOWED_RIGHTS_BASIS:
             raise PreflightInputError("manifest.rights_basis is not allowed")
 
+        private_pilot: PrivatePilotDeclaration | None = None
+        if "private_pilot" in data:
+            if rights_basis != PRIVATE_PILOT_RIGHTS_BASIS:
+                raise PreflightInputError("manifest.private_pilot is not allowed for this rights basis")
+            pilot_data = _mapping(data["private_pilot"], "manifest.private_pilot")
+            if frozenset(pilot_data) != _PRIVATE_PILOT_KEYS:
+                raise PreflightInputError("manifest.private_pilot keys must be exact")
+            source_sha256 = _safe_text(
+                pilot_data["source_sha256"], "manifest.private_pilot.source_sha256"
+            )
+            if not _SHA256_RE.match(source_sha256):
+                raise PreflightInputError(
+                    "manifest.private_pilot.source_sha256 must be 64 lower-case hex characters"
+                )
+            adapter_identifier = _safe_text(
+                pilot_data["adapter_identifier"], "manifest.private_pilot.adapter_identifier"
+            )
+            replace_existing = pilot_data["replace_existing_app"]
+            preserve_data = pilot_data["preserve_original_data"]
+            if not isinstance(replace_existing, bool) or not isinstance(preserve_data, bool):
+                raise PreflightInputError("manifest.private_pilot flags must be booleans")
+            private_pilot = PrivatePilotDeclaration(
+                source_sha256=source_sha256,
+                adapter_identifier=adapter_identifier,
+                app_groups=_safe_string_tuple(
+                    pilot_data["app_groups"], "manifest.private_pilot.app_groups"
+                ),
+                keychain_access_groups=_safe_string_tuple(
+                    pilot_data["keychain_access_groups"],
+                    "manifest.private_pilot.keychain_access_groups",
+                ),
+                url_schemes=_safe_string_tuple(
+                    pilot_data["url_schemes"], "manifest.private_pilot.url_schemes"
+                ),
+                extension_bundle_ids=_safe_string_tuple(
+                    pilot_data["extension_bundle_ids"],
+                    "manifest.private_pilot.extension_bundle_ids",
+                ),
+                replace_existing_app=replace_existing,
+                preserve_original_data=preserve_data,
+            )
+        elif rights_basis == PRIVATE_PILOT_RIGHTS_BASIS:
+            raise PreflightInputError("manifest.private_pilot is required for this rights basis")
+
         return cls(
             authorization_id=authorization_id,
             bundle_id=bundle_id,
@@ -244,6 +345,7 @@ class AuthorizationManifest:
             build_number=build_number,
             expected_sha256=expected_sha256,
             rights_basis=rights_basis,
+            private_pilot=private_pilot,
         )
 
 
@@ -313,13 +415,14 @@ def evaluate(manifest: Any, report: Any) -> PreflightResult:
         auth.version,
         auth.build_number,
     ) == LOAD_ONLY_PROOF_IDENTITY
+    private_pilot = auth.bundle_id == PRIVATE_PILOT_BUNDLE_ID
 
-    if auth.bundle_id not in ALLOWED_BUNDLE_IDS and not load_only_proof:
+    if auth.bundle_id not in ALLOWED_BUNDLE_IDS and not load_only_proof and not private_pilot:
         findings.append(
             Finding(
                 "BUNDLE_ID_NOT_ALLOWED",
                 _BLK,
-                "only explicitly owned test packages and the pinned load proof are eligible",
+                "only owned tests, the pinned load proof, and the private pilot are eligible",
             )
         )
     if load_only_proof:
@@ -338,6 +441,27 @@ def evaluate(manifest: Any, report: Any) -> PreflightResult:
                     _BLK,
                     "the pinned proof requires its recorded artifact hash",
                 )
+            )
+    elif private_pilot:
+        if (auth.version, auth.build_number) != (PRIVATE_PILOT_IDENTITY[1], PRIVATE_PILOT_IDENTITY[2]):
+            findings.append(
+                Finding(
+                    "PRIVATE_PILOT_IDENTITY_NOT_PINNED",
+                    _BLK,
+                    "the private pilot requires its pinned version and build",
+                )
+            )
+        if auth.rights_basis != PRIVATE_PILOT_RIGHTS_BASIS:
+            findings.append(
+                Finding(
+                    "RIGHTS_BASIS_NOT_ALLOWED_FOR_PRIVATE_PILOT",
+                    _BLK,
+                    "the private pilot requires its own rights basis",
+                )
+            )
+        if auth.private_pilot is not None:
+            _check_private_pilot(
+                auth.private_pilot, auth.expected_sha256, identity, report, findings
             )
     elif auth.rights_basis != OWNED_TEST_RIGHTS_BASIS:
         findings.append(
@@ -437,8 +561,84 @@ def evaluate(manifest: Any, report: Any) -> PreflightResult:
             "read-only preflight passed; execution remains prohibited in this plan",
         )
     )
-    plan = _build_plan(auth, identity, artifact, warning_codes, load_only_proof)
+    plan = _build_plan(
+        auth, identity, artifact, warning_codes, load_only_proof, private_pilot
+    )
     return PreflightResult(True, tuple(findings), plan)
+
+
+def _check_private_pilot(
+    pilot: PrivatePilotDeclaration,
+    expected_sha256: str,
+    identity: dict,
+    report: dict,
+    findings: list[Finding],
+) -> None:
+    """Apply the development-only coexistence policy without echoing values."""
+
+    def add_once(code: str, detail: str) -> None:
+        if not any(f.code == code for f in findings):
+            findings.append(Finding(code, _BLK, detail))
+
+    if pilot.source_sha256 != PRIVATE_PILOT_SOURCE_SHA256:
+        add_once("PRIVATE_PILOT_SOURCE_NOT_PINNED", "the pilot source hash is not pinned")
+    if expected_sha256 == PRIVATE_PILOT_SOURCE_SHA256:
+        add_once("PRIVATE_PILOT_ARTIFACT_NOT_DISTINCT", "the pilot artifact must be a distinct package")
+    if pilot.adapter_identifier != PRIVATE_PILOT_ADAPTER:
+        add_once("PRIVATE_PILOT_ADAPTER_NOT_PINNED", "the pilot adapter identifier is not pinned")
+    if pilot.replace_existing_app is not False or pilot.preserve_original_data is not True:
+        add_once("PRIVATE_PILOT_COEXISTENCE_DECLARATION_INVALID", "coexistence flags are invalid")
+
+    if tuple(pilot.url_schemes) != (PRIVATE_PILOT_URL_SCHEME,):
+        add_once("PRIVATE_PILOT_URL_SCHEME_NOT_PINNED", "only the pinned pilot URL scheme is allowed")
+    reported_schemes = tuple(sorted(identity.get("url_schemes") or []))
+    if reported_schemes != tuple(pilot.url_schemes):
+        add_once("PRIVATE_PILOT_URL_SCHEME_MISMATCH", "reported URL schemes differ from the declaration")
+
+    if report["signing"].get("provisioning_profile_present") is not True:
+        add_once("PRIVATE_PILOT_PROFILE_REQUIRED", "a private pilot profile must be declared")
+    profile = report["signing"].get("provisioning_profile")
+    if not isinstance(profile, dict):
+        add_once("PRIVATE_PILOT_PROFILE_REQUIRED", "a private pilot profile must be declared")
+        return
+
+    entitlement_keys = frozenset(profile.get("entitlement_keys") or [])
+    if not entitlement_keys <= PRIVATE_PILOT_ALLOWED_ENTITLEMENT_KEYS:
+        add_once("PRIVATE_PILOT_ENTITLEMENT_NOT_ALLOWED", "an unapproved entitlement key is present")
+    if not PRIVATE_PILOT_REQUIRED_ENTITLEMENT_KEYS <= entitlement_keys:
+        add_once("PRIVATE_PILOT_ENTITLEMENT_MISSING", "a required entitlement key is absent")
+
+    declared_groups = tuple(pilot.app_groups)
+    if not declared_groups or any(
+        not group.startswith(PRIVATE_PILOT_APP_GROUP_PREFIX) for group in declared_groups
+    ):
+        add_once("PRIVATE_PILOT_APP_GROUP_NOT_ALLOWED", "only pilot app groups are allowed")
+    reported_groups = tuple(sorted(profile.get("app_groups") or []))
+    if reported_groups != declared_groups:
+        add_once("PRIVATE_PILOT_APP_GROUP_MISMATCH", "reported app groups differ from the declaration")
+
+    declared_keychain = tuple(pilot.keychain_access_groups)
+    if declared_keychain:
+        add_once("PRIVATE_PILOT_KEYCHAIN_GROUPS_NOT_ALLOWED", "custom keychain groups are not allowed")
+    reported_keychain = tuple(sorted(profile.get("keychain_access_groups") or []))
+    if reported_keychain != declared_keychain:
+        add_once("PRIVATE_PILOT_KEYCHAIN_GROUP_MISMATCH", "reported keychain groups differ from the declaration")
+
+    declared_extensions = tuple(pilot.extension_bundle_ids)
+    if not declared_extensions or any(
+        not ident.startswith(PRIVATE_PILOT_EXTENSION_PREFIX) for ident in declared_extensions
+    ):
+        add_once("PRIVATE_PILOT_EXTENSION_NOT_ALLOWED", "only pilot extension identifiers are allowed")
+    reported_extensions = tuple(
+        sorted(
+            item.get("bundle_id")
+            for item in report["bundles"]["extensions"]
+            if isinstance(item, dict) and isinstance(item.get("bundle_id"), str)
+        )
+    )
+    extension_count = len(report["bundles"]["extensions"])
+    if extension_count != len(reported_extensions) or reported_extensions != declared_extensions:
+        add_once("PRIVATE_PILOT_EXTENSION_MISMATCH", "reported extensions differ from the declaration")
 
 
 def _rejected(findings: list[Finding]) -> PreflightResult:
@@ -472,6 +672,20 @@ def _safe_text(value: Any, path: str) -> str:
     if any(token in folded for token in _SECRET_MARKERS):
         raise UnsafeIdentityError(f"{path} looks like a secret")
     return value
+
+
+def _safe_string_tuple(value: Any, path: str) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise PreflightInputError(f"{path} must be a list")
+    if len(value) > 64:
+        raise UnsafeIdentityError(f"{path} contains too many values")
+    result: list[str] = []
+    for item in value:
+        text = _safe_text(item, path)
+        if text in result:
+            raise PreflightInputError(f"{path} contains duplicate values")
+        result.append(text)
+    return tuple(result)
 
 
 def _normalise_arch(slice_record: dict) -> str | None:
@@ -572,6 +786,8 @@ def _validate_report(report: Any) -> None:
         if not isinstance(executable, str) or not executable:
             raise PreflightInputError("report.identity.executable must be a string or null")
         _safe_text(executable.replace("/", "").replace("\\", ""), "report.identity.executable")
+    if "url_schemes" in identity:
+        _safe_string_tuple(identity["url_schemes"], "report.identity.url_schemes")
 
     artifact = _mapping(data.get("artifact"), "report.artifact")
     if isinstance(artifact.get("sha256"), str):
@@ -603,8 +819,27 @@ def _validate_report(report: Any) -> None:
         if entry.get("severity") != EXPECTED_SEVERITIES[code]:
             raise ReportInconsistentError("report.findings[] severity is inconsistent")
 
+    bundles = _mapping(data.get("bundles"), "report.bundles")
+    extensions = bundles.get("extensions")
+    if not isinstance(extensions, list):
+        raise PreflightInputError("report.bundles.extensions must be a list")
+    for item in extensions:
+        entry = _mapping(item, "report.bundles.extensions[]")
+        if entry.get("bundle_id") is not None:
+            _safe_text(entry["bundle_id"], "report.bundles.extensions[].bundle_id")
+
     signing = _mapping(data.get("signing"), "report.signing")
     _mapping(signing.get("verification"), "report.signing.verification")
+    if "provisioning_profile_present" in signing and not isinstance(
+        signing["provisioning_profile_present"], bool
+    ):
+        raise PreflightInputError("report.signing.provisioning_profile_present must be boolean")
+    profile = signing.get("provisioning_profile")
+    if profile is not None:
+        profile = _mapping(profile, "report.signing.provisioning_profile")
+        for key in ("entitlement_keys", "app_groups", "keychain_access_groups"):
+            if key in profile:
+                _safe_string_tuple(profile[key], f"report.signing.provisioning_profile.{key}")
     interpretation = _mapping(data.get("interpretation"), "report.interpretation")
     if "malware_verdict" not in interpretation:
         raise PreflightInputError("report.interpretation.malware_verdict is required")
@@ -620,6 +855,7 @@ def _build_plan(
     artifact: dict,
     warning_codes: list[str],
     load_only_proof: bool,
+    private_pilot: bool,
 ) -> dict:
     """Produce a deterministic plan; no step in it is executable by this tool."""
     steps = [
@@ -676,6 +912,23 @@ def _build_plan(
                 "requires": ["owner_runtime_scope", "authorized_device", "secure_signing_inputs"],
             }
         )
+    if private_pilot:
+        steps.append(
+            {
+                "id": "verify_unique_bundle_isolation",
+                "status": "blocked",
+                "action": "would confirm on-device that the existing Instagram data container is untouched",
+                "requires": ["final_owner_approval", "authorized_device", "rollback_plan"],
+            }
+        )
+        steps.append(
+            {
+                "id": "verify_core_load_in_host",
+                "status": "blocked",
+                "action": "would collect the fixed constructor load marker from the pilot process",
+                "requires": ["owner_runtime_scope", "authorized_device", "secure_signing_inputs"],
+            }
+        )
 
     limitations = [
         "no IPA is opened, extracted, modified, signed, or installed by this tool",
@@ -689,13 +942,24 @@ def _build_plan(
             "the pinned load-only proof permits no hook, host UI test, signing, "
             "installation, or device action by this tool"
         )
+    if private_pilot:
+        limitations.append(
+            "the private pilot is a development-only distinct bundle identity; "
+            "it does not weaken the production Instagram gate or prove coexistence on a device"
+        )
 
     return {
         "plan_version": PLAN_SCHEMA_VERSION,
         "mode": "dry_run",
         "execution_permitted": False,
         "status": "READY_FOR_INDEPENDENT_REVIEW",
-        "purpose": "load_only_proof" if load_only_proof else "owned_test_package",
+        "purpose": (
+            "load_only_proof"
+            if load_only_proof
+            else "private_pilot_installability"
+            if private_pilot
+            else "owned_test_package"
+        ),
         "authorization": {
             "authorization_id": auth.authorization_id,
             "rights_basis": auth.rights_basis,
@@ -714,6 +978,8 @@ def _build_plan(
             "compatibility_adapter": (
                 LOAD_ONLY_PROOF_ADAPTER
                 if load_only_proof
+                else PRIVATE_PILOT_ADAPTER
+                if private_pilot
                 else "not_applicable_to_owned_test_package"
             ),
             "hook": False,

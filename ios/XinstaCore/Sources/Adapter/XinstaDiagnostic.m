@@ -15,8 +15,9 @@
             return XinstaInitializationStatusTargetUnavailable;
         }
 
-        NSString *expectedBinding = [XinstaIG456Adapter adapterIdentifier];
-        if (![registry.adapterIdentifier isEqualToString:expectedBinding]) {
+        NSString *expectedBinding = adapter.adapterIdentifier;
+        if (expectedBinding.length == 0 ||
+            ![registry.adapterIdentifier isEqualToString:expectedBinding]) {
             return XinstaInitializationStatusBindingMismatch;
         }
         for (XinstaFeature *feature in registry.features) {

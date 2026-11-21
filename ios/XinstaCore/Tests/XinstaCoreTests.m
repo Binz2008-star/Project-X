@@ -4,6 +4,7 @@
 #import "XinstaFeature.h"
 #import "XinstaFeatureRegistry.h"
 #import "XinstaCompatibility.h"
+#import "XinstaIdentityPolicy.h"
 #import "XinstaHostMetadata.h"
 #import "XinstaSettingsDataSource.h"
 #import "XinstaIG456Adapter.h"
@@ -66,6 +67,12 @@ static XinstaHostMetadata *ValidMetadata(void) {
                     [XinstaCompatibility supportedBuild]);
 }
 
+static XinstaHostMetadata *PilotMetadata(void) {
+    return Metadata(XinstaBundleIdentifierPrivatePilot,
+                    XinstaPrivatePilotVersion,
+                    XinstaPrivatePilotBuild);
+}
+
 static XinstaSymbolAvailability AllSymbols(void) {
     return ^BOOL(NSString *name) { return name.length > 0; };
 }
@@ -87,6 +94,20 @@ static void TestFeatureRegistration(void) {
     XinstaFeatureRegistry *reloaded = TestRegistry(defaults);
     Expect([reloaded isEnabledForIdentifier:@"demo.toggle"], @"override survives a registry rebuild");
     Expect(reloaded.effectiveStates.count == 2, @"effective states cover all bound features");
+
+    XinstaFeatureRegistry *pilotRegistry =
+        [XinstaFeatureRegistry sharedRegistryForAdapterIdentifier:XinstaAdapterIdentifierPrivatePilot];
+    Expect(pilotRegistry != nil, @"pilot binding has its own registry");
+    Expect([pilotRegistry.adapterIdentifier isEqualToString:XinstaAdapterIdentifierPrivatePilot],
+           @"pilot registry records its distinct binding");
+    Expect(pilotRegistry.features.count == 3, @"pilot registry exposes the reviewed feature set");
+    Expect([pilotRegistry.features.firstObject.adapterIdentifier
+           isEqualToString:XinstaAdapterIdentifierPrivatePilot],
+           @"pilot features are bound only to the pilot adapter");
+    Expect([XinstaFeatureRegistry sharedRegistryForAdapterIdentifier:@"com.example.other"] == nil,
+           @"unknown binding has no registry");
+    Expect([XinstaFeatureRegistry sharedRegistryForAdapterIdentifier:nil] == nil,
+           @"empty binding has no registry");
 }
 
 static void TestAdapterBindingFilter(void) {
@@ -243,6 +264,77 @@ static void TestCompatibility(void) {
            @"symbol failure reason code is stable");
 }
 
+static void TestPrivatePilotIdentityPolicy(void) {
+    NSString *productionBinding = [XinstaIdentityPolicy
+        adapterIdentifierForBundleIdentifier:[XinstaCompatibility supportedBundleIdentifier]
+                                     version:[XinstaCompatibility supportedVersion]
+                                       build:[XinstaCompatibility supportedBuild]];
+    NSString *pilotBinding = [XinstaIdentityPolicy
+        adapterIdentifierForBundleIdentifier:XinstaBundleIdentifierPrivatePilot
+                                     version:XinstaPrivatePilotVersion
+                                       build:XinstaPrivatePilotBuild];
+    Expect([productionBinding isEqualToString:XinstaAdapterIdentifierIG456],
+           @"production identity keeps its original binding");
+    Expect([pilotBinding isEqualToString:XinstaAdapterIdentifierPrivatePilot],
+           @"pilot identity has a distinct binding");
+    Expect([XinstaIdentityPolicy adapterIdentifierForBundleIdentifier:XinstaBundleIdentifierPrivatePilot
+                                                              version:@"456.0.1"
+                                                                build:XinstaPrivatePilotBuild] == nil,
+           @"pilot version near miss has no binding");
+    Expect([XinstaIdentityPolicy adapterIdentifierForBundleIdentifier:XinstaBundleIdentifierPrivatePilot
+                                                              version:XinstaPrivatePilotVersion
+                                                                build:@"0"] == nil,
+           @"pilot build near miss has no binding");
+    Expect([XinstaIdentityPolicy adapterIdentifierForBundleIdentifier:@"com.example.other"
+                                                              version:XinstaPrivatePilotVersion
+                                                                build:XinstaPrivatePilotBuild] == nil,
+           @"unrecognised bundle has no binding");
+    Expect([XinstaIdentityPolicy isPilotBundleIdentifier:XinstaBundleIdentifierPrivatePilot],
+           @"pilot bundle is recognised");
+    Expect(![XinstaIdentityPolicy isPilotBundleIdentifier:[XinstaCompatibility supportedBundleIdentifier]],
+           @"production bundle is not treated as the pilot");
+    Expect([[XinstaCompatibility privatePilotBundleIdentifier] isEqualToString:XinstaBundleIdentifierPrivatePilot],
+           @"compatibility exposes the pinned pilot bundle");
+    Expect([[XinstaCompatibility privatePilotAdapterIdentifier] isEqualToString:XinstaAdapterIdentifierPrivatePilot],
+           @"compatibility exposes the pinned pilot binding");
+
+    XinstaCompatibilityReport *pilotOk =
+        [XinstaCompatibility checkBundleIdentifier:XinstaBundleIdentifierPrivatePilot
+                                            version:XinstaPrivatePilotVersion
+                                              build:XinstaPrivatePilotBuild
+                                  symbolAvailability:AllSymbols()];
+    Expect(pilotOk.supported, @"exact pilot identity and symbols are supported");
+    Expect([pilotOk.reasonCode isEqualToString:XinstaCompatibilityReasonAccepted],
+           @"pilot acceptance uses the stable accepted code");
+
+    XinstaCompatibilityReport *pilotWrongVersion =
+        [XinstaCompatibility checkBundleIdentifier:XinstaBundleIdentifierPrivatePilot
+                                            version:@"456.0.1"
+                                              build:XinstaPrivatePilotBuild
+                                  symbolAvailability:AllSymbols()];
+    Expect(!pilotWrongVersion.supported, @"pilot version near miss is rejected");
+    Expect([pilotWrongVersion.reasonCode isEqualToString:XinstaCompatibilityReasonVersionMismatch],
+           @"pilot version rejection code is stable");
+
+    XinstaCompatibilityReport *pilotWrongBuild =
+        [XinstaCompatibility checkBundleIdentifier:XinstaBundleIdentifierPrivatePilot
+                                            version:XinstaPrivatePilotVersion
+                                              build:@"0"
+                                  symbolAvailability:AllSymbols()];
+    Expect(!pilotWrongBuild.supported, @"pilot build near miss is rejected");
+    Expect([pilotWrongBuild.reasonCode isEqualToString:XinstaCompatibilityReasonBuildMismatch],
+           @"pilot build rejection code is stable");
+
+    XinstaCompatibilityReport *pilotNoSymbols =
+        [XinstaCompatibility checkBundleIdentifier:XinstaBundleIdentifierPrivatePilot
+                                            version:XinstaPrivatePilotVersion
+                                              build:XinstaPrivatePilotBuild
+                                  symbolAvailability:nil];
+    Expect(!pilotNoSymbols.supported, @"pilot without runtime symbols fails closed");
+    Expect([pilotNoSymbols.reasonCode isEqualToString:XinstaCompatibilityReasonTargetUnavailable],
+           @"pilot symbol rejection code is stable");
+}
+
 static void TestAdapter(void) {
     __block NSUInteger calls = 0;
     XinstaSymbolAvailability counted = ^BOOL(NSString *name) {
@@ -253,8 +345,10 @@ static void TestAdapter(void) {
                                                                  symbolAvailability:counted];
     Expect(!accepted.compatibilityAccepted, @"adapter begins unaccepted");
     Expect(!accepted.targetRuntimeVerified, @"adapter begins without a verified target");
+    Expect([accepted.adapterIdentifier isEqualToString:XinstaAdapterIdentifierIG456],
+           @"production adapter instance keeps the production binding");
     Expect([[XinstaIG456Adapter adapterIdentifier] isEqualToString:XinstaAdapterIdentifierIG456],
-           @"adapter identifier matches the feature binding");
+           @"production class binding is unchanged");
     Expect([accepted evaluateCompatibility], @"injected exact metadata is accepted");
     Expect(accepted.compatibilityAccepted, @"accepted state is exposed");
     Expect(accepted.targetRuntimeVerified, @"accepted evaluation verified the target class");
@@ -269,6 +363,7 @@ static void TestAdapter(void) {
     Expect(!wrongBundle.targetRuntimeVerified, @"wrong bundle never verifies a target");
     Expect([wrongBundle.compatibilityReport.reasonCode isEqualToString:XinstaCompatibilityReasonBundleIdentifierMismatch],
            @"wrong bundle reason code is reported");
+    Expect(wrongBundle.adapterIdentifier == nil, @"unrecognised identity has no adapter binding");
 
     XinstaIG456Adapter *wrongVersion = [[XinstaIG456Adapter alloc] initWithHostMetadata:Metadata(@"com.burbn.instagram", @"1.0", @"1114925422")
                                                                      symbolAvailability:AllSymbols()];
@@ -276,6 +371,15 @@ static void TestAdapter(void) {
     XinstaIG456Adapter *wrongBuild = [[XinstaIG456Adapter alloc] initWithHostMetadata:Metadata(@"com.burbn.instagram", @"456.0.0", @"0")
                                                                    symbolAvailability:AllSymbols()];
     Expect(![wrongBuild evaluateCompatibility], @"wrong build is rejected");
+
+    XinstaIG456Adapter *pilot = [[XinstaIG456Adapter alloc] initWithHostMetadata:PilotMetadata()
+                                                               symbolAvailability:AllSymbols()];
+    Expect([pilot evaluateCompatibility], @"injected pilot metadata is accepted");
+    Expect([pilot.adapterIdentifier isEqualToString:XinstaAdapterIdentifierPrivatePilot],
+           @"pilot adapter instance uses the distinct binding");
+    Expect(pilot.targetRuntimeVerified, @"pilot evaluation verifies the same target class");
+    Expect([[XinstaIG456Adapter adapterIdentifier] isEqualToString:XinstaAdapterIdentifierIG456],
+           @"pilot evaluation does not change the production class binding");
 
     __block NSUInteger failedCalls = 0;
     XinstaSymbolAvailability onceFailing = ^BOOL(NSString *name) {
@@ -334,6 +438,18 @@ static void TestInitializationDiagnostic(void) {
         adapterIdentifier:XinstaAdapterIdentifierIG456];
     Expect([XinstaDiagnostic statusForAdapter:unaccepted registry:empty] == XinstaInitializationStatusNoBoundFeatures,
            @"no bound features blocks initialization");
+
+    XinstaIG456Adapter *pilot = [[XinstaIG456Adapter alloc] initWithHostMetadata:PilotMetadata()
+                                                               symbolAvailability:AllSymbols()];
+    [pilot evaluateCompatibility];
+    XinstaFeatureRegistry *pilotRegistry =
+        [XinstaFeatureRegistry sharedRegistryForAdapterIdentifier:XinstaAdapterIdentifierPrivatePilot];
+    Expect([XinstaDiagnostic statusForAdapter:pilot registry:pilotRegistry] == XinstaInitializationStatusReady,
+           @"accepted pilot adapter is ready only with the pilot registry");
+    Expect([XinstaDiagnostic statusForAdapter:pilot registry:registry] == XinstaInitializationStatusBindingMismatch,
+           @"pilot adapter cannot use a production registry");
+    Expect([XinstaDiagnostic statusForAdapter:unaccepted registry:pilotRegistry] == XinstaInitializationStatusBindingMismatch,
+           @"production adapter cannot use a pilot registry");
 }
 
 static void TestLoadEntryPoint(void) {
@@ -351,6 +467,7 @@ int main(void) {
         TestPersistenceHardening();
         TestSettingsBehaviour();
         TestCompatibility();
+        TestPrivatePilotIdentityPolicy();
         TestAdapter();
         TestRuntimeSymbolLookup();
         TestInitializationDiagnostic();

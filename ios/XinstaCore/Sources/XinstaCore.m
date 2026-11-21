@@ -10,7 +10,8 @@
     @try {
         XinstaIG456Adapter *adapter = [XinstaIG456Adapter sharedAdapter];
         BOOL accepted = [adapter evaluateCompatibility];
-        XinstaFeatureRegistry *registry = [XinstaFeatureRegistry sharedRegistry];
+        NSString *binding = adapter.adapterIdentifier;
+        XinstaFeatureRegistry *registry = [XinstaFeatureRegistry sharedRegistryForAdapterIdentifier:binding];
         XinstaInitializationStatus status = [XinstaDiagnostic statusForAdapter:adapter
                                                                       registry:registry];
         // Fixed codes and a count only; never echo host-controlled strings or

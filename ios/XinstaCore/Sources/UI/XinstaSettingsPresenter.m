@@ -24,7 +24,9 @@
     if (!self.adapter.compatibilityAccepted || !self.adapter.targetRuntimeVerified) {
         return NO;
     }
-    if (![self.dataSource.adapterIdentifier isEqualToString:[XinstaIG456Adapter adapterIdentifier]]) {
+    NSString *binding = self.adapter.adapterIdentifier;
+    if (binding.length == 0 ||
+        ![self.dataSource.adapterIdentifier isEqualToString:binding]) {
         return NO;
     }
     NSArray<XinstaFeature *> *features = self.dataSource.features;
@@ -32,7 +34,7 @@
         return NO;
     }
     for (XinstaFeature *feature in features) {
-        if (![feature.adapterIdentifier isEqualToString:[XinstaIG456Adapter adapterIdentifier]]) {
+        if (![feature.adapterIdentifier isEqualToString:binding]) {
             return NO;
         }
     }

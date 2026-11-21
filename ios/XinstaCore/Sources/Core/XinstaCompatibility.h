@@ -45,6 +45,12 @@ extern NSString * const XinstaCompatibilityReasonSymbolsUnavailable;
 + (NSString *)supportedVersion;
 + (NSString *)supportedBuild;
 
+/// Development-only private pilot identity. Accepting the pilot does not
+/// change the production adapter identifier and does not authorize hooks,
+/// installation, or device actions.
++ (NSString *)privatePilotBundleIdentifier;
++ (NSString *)privatePilotAdapterIdentifier;
+
 /// The single host class this adapter is allowed to inspect. No other target
 /// class may be introduced without a new, separately reviewed adapter.
 + (NSString *)targetClassName;

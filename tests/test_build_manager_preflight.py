@@ -16,6 +16,12 @@ import pytest
 from project_x.buildmanager import (
     ACCEPTED_REPORT_SCHEMA_VERSIONS,
     EXPECTED_SEVERITIES,
+    PRIVATE_PILOT_ADAPTER,
+    PRIVATE_PILOT_APP_GROUP_PREFIX,
+    PRIVATE_PILOT_BUNDLE_ID,
+    PRIVATE_PILOT_EXTENSION_PREFIX,
+    PRIVATE_PILOT_RIGHTS_BASIS,
+    PRIVATE_PILOT_URL_SCHEME,
     REPORT_INCONSISTENT_CODE,
     UNSAFE_IDENTITY_CODE,
     evaluate,
@@ -40,6 +46,9 @@ IG456_VERSION = "456.0.0"
 IG456_BUILD = "1114925422"
 IG456_SHA = "665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131"
 IG456_ADAPTER = "com.burbn.instagram@456.0.0@1114925422"
+PILOT_SHA = "d" * 64
+PILOT_GROUP = PRIVATE_PILOT_APP_GROUP_PREFIX + ".loadproof"
+PILOT_EXTENSION = PRIVATE_PILOT_EXTENSION_PREFIX + "ShareExtension"
 
 
 def authorization_manifest() -> dict:
@@ -99,6 +108,7 @@ def inspection_report() -> dict:
             "executable": "Payload/demo.app/demo",
             "device_families": [1, 2],
             "supported_platforms": ["iOS"],
+            "url_schemes": [],
         },
         "macho": {
             "slice_count": 1,
@@ -158,6 +168,74 @@ def load_only_report() -> dict:
         build_number=IG456_BUILD,
         executable="Payload/Target.app/Target",
     )
+    return report
+
+
+def private_pilot_manifest() -> dict:
+    manifest = authorization_manifest()
+    manifest["authorization_id"] = "AUTH-IG456-PILOT-001"
+    manifest["expected_identity"] = {
+        "bundle_id": PRIVATE_PILOT_BUNDLE_ID,
+        "version": "456.0.0",
+        "build_number": "1114925422",
+    }
+    manifest["expected_sha256"] = PILOT_SHA
+    manifest["rights_basis"] = PRIVATE_PILOT_RIGHTS_BASIS
+    manifest["private_pilot"] = {
+        "source_sha256": IG456_SHA,
+        "adapter_identifier": PRIVATE_PILOT_ADAPTER,
+        "app_groups": [PILOT_GROUP],
+        "keychain_access_groups": [],
+        "url_schemes": [PRIVATE_PILOT_URL_SCHEME],
+        "extension_bundle_ids": [PILOT_EXTENSION],
+        "replace_existing_app": False,
+        "preserve_original_data": True,
+    }
+    return manifest
+
+
+def private_pilot_report() -> dict:
+    report = inspection_report()
+    report["schema_version"] = "1.2"
+    report["artifact"]["sha256"] = PILOT_SHA
+    report["identity"].update(
+        bundle_id=PRIVATE_PILOT_BUNDLE_ID,
+        name="Xinsta Private Pilot",
+        display_name="Xinsta Private Pilot",
+        version="456.0.0",
+        build_number="1114925422",
+        executable="Payload/XinstaPilot.app/XinstaPilot",
+        url_schemes=[PRIVATE_PILOT_URL_SCHEME],
+    )
+    report["bundles"]["extensions"] = [
+        {
+            "path": "Payload/XinstaPilot.app/PlugIns/Pilot.appex/",
+            "kind": "appex",
+            "bundle_id": PILOT_EXTENSION,
+            "name": "Pilot",
+            "version": "1.0",
+            "executable": "Payload/XinstaPilot.app/PlugIns/Pilot.appex/Pilot",
+            "executable_present": True,
+            "has_info_plist": True,
+            "has_code_signature": True,
+        }
+    ]
+    report["signing"]["provisioning_profile_present"] = True
+    report["signing"]["provisioning_profile"] = {
+        "name": "private-pilot",
+        "team_identifiers": ["TEAMID1234"],
+        "expires_at": "2026-12-01T00:00:00+00:00",
+        "provisioned_device_count": 1,
+        "entitlement_keys": [
+            "application-identifier",
+            "get-task-allow",
+            "com.apple.security.application-groups",
+        ],
+        "platforms": ["iOS"],
+        "provisions_all_devices": False,
+        "app_groups": [PILOT_GROUP],
+        "keychain_access_groups": [],
+    }
     return report
 
 
@@ -357,6 +435,144 @@ def test_owned_test_package_cannot_use_load_only_rights_basis() -> None:
     result = evaluate(manifest, inspection_report())
     assert result.preflight_passed is False
     assert "RIGHTS_BASIS_NOT_ALLOWED_FOR_OWNED_TEST" in codes(result)
+
+
+def test_private_pilot_produces_dry_run_plan() -> None:
+    result = evaluate(private_pilot_manifest(), private_pilot_report())
+    assert result.preflight_passed is True
+    assert result.plan is not None
+    assert result.plan["mode"] == "dry_run"
+    assert result.plan["execution_permitted"] is False
+    assert result.plan["purpose"] == "private_pilot_installability"
+    assert result.plan["authorization"]["rights_basis"] == PRIVATE_PILOT_RIGHTS_BASIS
+    assert result.plan["xinsta_core"]["compatibility_adapter"] == PRIVATE_PILOT_ADAPTER
+    assert result.plan["xinsta_core"]["hook"] is False
+    assert result.plan["xinsta_core"]["swizzle"] is False
+
+    blocked = {step["id"] for step in result.plan["steps"] if step["status"] == "blocked"}
+    assert {
+        "codesign_bundle_and_frameworks",
+        "register_device_and_install",
+        "verify_unique_bundle_isolation",
+        "verify_core_load_in_host",
+        "verify_x_settings_in_host",
+    } <= blocked
+    assert any("development-only distinct bundle identity" in item for item in result.plan["limitations"])
+    assert result.plan["package"]["sha256"] == PILOT_SHA
+
+
+@pytest.mark.parametrize(
+    ("mutate_manifest", "mutate_report", "expected_code"),
+    [
+        (lambda m: m["expected_identity"].update(version="456.0.1"), lambda r: None,
+         "PRIVATE_PILOT_IDENTITY_NOT_PINNED"),
+        (lambda m: m["expected_identity"].update(build_number="1114925421"), lambda r: None,
+         "PRIVATE_PILOT_IDENTITY_NOT_PINNED"),
+        (lambda m: (m.update(rights_basis="owned-test-package"), m.pop("private_pilot")),
+         lambda r: None, "RIGHTS_BASIS_NOT_ALLOWED_FOR_PRIVATE_PILOT"),
+        (lambda m: m["private_pilot"].update(source_sha256="b" * 64), lambda r: None,
+         "PRIVATE_PILOT_SOURCE_NOT_PINNED"),
+        (lambda m: m.update(expected_sha256=IG456_SHA), lambda r: None,
+         "PRIVATE_PILOT_ARTIFACT_NOT_DISTINCT"),
+        (lambda m: m["private_pilot"].update(adapter_identifier=IG456_ADAPTER), lambda r: None,
+         "PRIVATE_PILOT_ADAPTER_NOT_PINNED"),
+        (lambda m: m["private_pilot"].update(app_groups=["group.com.burbn.instagram"]),
+         lambda r: None, "PRIVATE_PILOT_APP_GROUP_NOT_ALLOWED"),
+        (lambda m: m["private_pilot"].update(keychain_access_groups=["ABC.teamID"]),
+         lambda r: None, "PRIVATE_PILOT_KEYCHAIN_GROUPS_NOT_ALLOWED"),
+        (lambda m: m["private_pilot"].update(url_schemes=["instagram"]), lambda r: None,
+         "PRIVATE_PILOT_URL_SCHEME_NOT_PINNED"),
+        (lambda m: m["private_pilot"].update(extension_bundle_ids=["com.burbn.instagram.share"]),
+         lambda r: None, "PRIVATE_PILOT_EXTENSION_NOT_ALLOWED"),
+        (lambda m: m["private_pilot"].update(replace_existing_app=True), lambda r: None,
+         "PRIVATE_PILOT_COEXISTENCE_DECLARATION_INVALID"),
+        (lambda m: m["private_pilot"].update(preserve_original_data=False), lambda r: None,
+         "PRIVATE_PILOT_COEXISTENCE_DECLARATION_INVALID"),
+        (lambda m: None, lambda r: r["identity"].update(url_schemes=["instagram"]),
+         "PRIVATE_PILOT_URL_SCHEME_MISMATCH"),
+        (lambda m: None,
+         lambda r: r["signing"]["provisioning_profile"].update(
+             app_groups=["group.com.burbn.instagram"]),
+         "PRIVATE_PILOT_APP_GROUP_MISMATCH"),
+        (lambda m: None,
+         lambda r: r["signing"]["provisioning_profile"].update(
+             keychain_access_groups=["ABC.teamID"]),
+         "PRIVATE_PILOT_KEYCHAIN_GROUP_MISMATCH"),
+        (lambda m: None,
+         lambda r: r["signing"]["provisioning_profile"].update(
+             entitlement_keys=[
+                 "application-identifier",
+                 "get-task-allow",
+                 "com.apple.developer.associated-domains",
+             ]),
+         "PRIVATE_PILOT_ENTITLEMENT_NOT_ALLOWED"),
+        (lambda m: None,
+         lambda r: r["signing"]["provisioning_profile"].update(
+             entitlement_keys=["application-identifier", "com.apple.security.application-groups"]),
+         "PRIVATE_PILOT_ENTITLEMENT_MISSING"),
+        (lambda m: None,
+         lambda r: r["signing"].update(
+             provisioning_profile_present=False, provisioning_profile=None),
+         "PRIVATE_PILOT_PROFILE_REQUIRED"),
+        (lambda m: None,
+         lambda r: r["bundles"]["extensions"][0].update(bundle_id="com.burbn.instagram.share"),
+         "PRIVATE_PILOT_EXTENSION_MISMATCH"),
+    ],
+)
+def test_private_pilot_policy_rejects_unsafe_variants(mutate_manifest, mutate_report, expected_code):
+    manifest = private_pilot_manifest()
+    report = private_pilot_report()
+    mutate_manifest(manifest)
+    mutate_report(report)
+    result = evaluate(manifest, report)
+    assert result.preflight_passed is False
+    assert expected_code in codes(result)
+    assert result.plan is None
+
+
+def test_private_pilot_declaration_is_required() -> None:
+    manifest = private_pilot_manifest()
+    del manifest["private_pilot"]
+    result = evaluate(manifest, private_pilot_report())
+    assert result.preflight_passed is False
+    assert "MANIFEST_INVALID" in codes(result)
+
+
+def test_private_pilot_rights_cannot_relax_production_gate() -> None:
+    manifest = load_only_manifest()
+    manifest["rights_basis"] = PRIVATE_PILOT_RIGHTS_BASIS
+    manifest["private_pilot"] = private_pilot_manifest()["private_pilot"]
+    result = evaluate(manifest, load_only_report())
+    assert result.preflight_passed is False
+    assert "RIGHTS_BASIS_NOT_ALLOWED_FOR_LOAD_PROOF" in codes(result)
+    assert result.plan is None
+
+
+def test_private_pilot_artifact_hash_is_declaration_bound_not_pinned() -> None:
+    manifest = private_pilot_manifest()
+    report = private_pilot_report()
+    distinct_hash = "e" * 64
+    manifest["expected_sha256"] = distinct_hash
+    report["artifact"]["sha256"] = distinct_hash
+    result = evaluate(manifest, report)
+    assert result.preflight_passed is True
+    assert result.plan["package"]["sha256"] == distinct_hash
+
+
+def test_private_pilot_missing_extension_inventory_is_rejected() -> None:
+    report = private_pilot_report()
+    del report["bundles"]["extensions"]
+    result = evaluate(private_pilot_manifest(), report)
+    assert result.preflight_passed is False
+    assert "REPORT_INVALID" in codes(result)
+
+
+def test_private_pilot_non_string_entitlement_keys_are_rejected() -> None:
+    report = private_pilot_report()
+    report["signing"]["provisioning_profile"]["entitlement_keys"] = [{"unexpected": "value"}]
+    result = evaluate(private_pilot_manifest(), report)
+    assert result.preflight_passed is False
+    assert "REPORT_INVALID" in codes(result)
 
 
 @pytest.mark.parametrize(
@@ -804,7 +1020,7 @@ def test_expected_critical_code_blocks_the_plan() -> None:
     assert result.plan is None
 
 
-# --- Report schema compatibility (1.0 and 1.1) ------------------------------
+# --- Report schema compatibility (1.0, 1.1 and 1.2) -------------------------
 
 
 @pytest.mark.parametrize("version", sorted(ACCEPTED_REPORT_SCHEMA_VERSIONS))
@@ -895,9 +1111,10 @@ def test_cli_recursion_safe_rejection(tmp_path, capsys) -> None:
     assert json.loads(capsys.readouterr().out) == {"error": "json_too_deep"}
 
 
-def test_cli_accepts_valid_report_schema_1_1(tmp_path, capsys) -> None:
+@pytest.mark.parametrize("schema_version", ["1.1", "1.2"])
+def test_cli_accepts_valid_report_schema_1_1(tmp_path, capsys, schema_version) -> None:
     report = inspection_report()
-    report["schema_version"] = "1.1"
+    report["schema_version"] = schema_version
     args = _write_inputs(tmp_path, json.dumps(authorization_manifest()), report)
     assert main(args) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -922,3 +1139,4 @@ def test_documentation_states_the_current_review_and_schema_contract() -> None:
     assert '44841879766' in text
     assert "`1.0`" in text
     assert "`1.1`" in text
+    assert "`1.2`" in text

@@ -6,13 +6,16 @@ on:
     paths:
       - 'ios/XinstaCore/**'
       - 'docs/XINSTA_CORE.md'
+      - 'docs/IG456_PRIVATE_PILOT.md'
       - '.github/workflows/xinsta-core-build.yml'
   push:
     branches:
       - 'feature/xinsta-core'
+      - 'feature/ig456-private-pilot-identity'
     paths:
       - 'ios/XinstaCore/**'
       - 'docs/XINSTA_CORE.md'
+      - 'docs/IG456_PRIVATE_PILOT.md'
       - '.github/workflows/xinsta-core-build.yml'
   workflow_dispatch:
 

@@ -19,6 +19,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (instancetype)sharedRegistry;
 
+/// Returns the registry bound to one reviewed adapter identifier. Unknown or
+/// empty bindings return nil; each accepted binding has its own registry so a
+/// production feature can never be exposed in the private pilot and vice versa.
++ (nullable instancetype)sharedRegistryForAdapterIdentifier:(nullable NSString *)adapterIdentifier;
+
 - (BOOL)isEnabledForIdentifier:(NSString *)identifier;
 - (void)setEnabled:(BOOL)enabled forIdentifier:(NSString *)identifier;
 - (NSDictionary<NSString *, NSNumber *> *)effectiveStates;

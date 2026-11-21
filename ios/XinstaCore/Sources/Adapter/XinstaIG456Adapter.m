@@ -2,6 +2,8 @@
 
 #import <objc/runtime.h>
 
+#import "XinstaIdentityPolicy.h"
+
 @interface XinstaIG456Adapter ()
 @property (nonatomic, strong) XinstaHostMetadata *hostMetadata;
 @property (nonatomic, copy, nullable) XinstaSymbolAvailability symbolAvailability;
@@ -60,6 +62,10 @@
         _hostMetadata = hostMetadata;
         _symbolAvailability = [symbolAvailability copy];
         _stateLock = [[NSLock alloc] init];
+        _adapterIdentifier = [[XinstaIdentityPolicy
+            adapterIdentifierForBundleIdentifier:hostMetadata.bundleIdentifier
+                                          version:hostMetadata.version
+                                            build:hostMetadata.build] copy];
         _compatibilityAccepted = NO;
         _verifiedTargetRuntime = NO;
         _compatibilityReport = [[XinstaCompatibilityReport alloc] initWithSupported:NO

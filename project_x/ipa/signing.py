@@ -9,12 +9,16 @@ presence for validity.
 from __future__ import annotations
 
 import plistlib
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 
 from .safety import SafeArchive
 
 MAX_PROVISIONING_BYTES = 1024 * 1024
+MAX_GROUP_VALUES = 64
+MAX_GROUP_VALUE_LENGTH = 256
+_GROUP_VALUE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.*_+-]*$")
 
 _PLIST_START = b"<?xml"
 _PLIST_END = b"</plist>"
@@ -22,6 +26,24 @@ _PLIST_END = b"</plist>"
 
 class SigningError(ValueError):
     """Signing metadata exists but cannot be read."""
+
+
+def _group_values(value: object) -> tuple[str, ...]:
+    """Read bounded entitlement group identifiers without echoing raw errors."""
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise SigningError("PLIST_INVALID")
+    values: set[str] = set()
+    for item in value:
+        if not isinstance(item, str) or not _GROUP_VALUE_RE.match(item):
+            raise SigningError("PLIST_INVALID")
+        if len(item) > MAX_GROUP_VALUE_LENGTH:
+            raise SigningError("PLIST_INVALID")
+        values.add(item)
+        if len(values) > MAX_GROUP_VALUES:
+            raise SigningError("PLIST_INVALID")
+    return tuple(sorted(values))
 
 
 @dataclass(frozen=True)
@@ -33,6 +55,8 @@ class ProvisioningProfileSummary:
     entitlement_keys: tuple[str, ...]
     platforms: tuple[str, ...]
     provisions_all_devices: bool | None
+    app_groups: tuple[str, ...] = field(default_factory=tuple)
+    keychain_access_groups: tuple[str, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict:
         name = self.name if isinstance(self.name, str) and self.name else None
@@ -45,6 +69,8 @@ class ProvisioningProfileSummary:
             "entitlement_keys": list(self.entitlement_keys),
             "platforms": list(self.platforms),
             "provisions_all_devices": self.provisions_all_devices,
+            "app_groups": list(self.app_groups),
+            "keychain_access_groups": list(self.keychain_access_groups),
         }
 
 
@@ -122,6 +148,8 @@ def _summarise_profile(profile: dict) -> ProvisioningProfileSummary:
         entitlement_keys=tuple(sorted(str(k) for k in entitlements)) if isinstance(entitlements, dict) else (),
         platforms=tuple(str(p) for p in platforms) if isinstance(platforms, list) else (str(platforms),),
         provisions_all_devices=all_devices if isinstance(all_devices, bool) else None,
+        app_groups=_group_values(entitlements.get("com.apple.security.application-groups")),
+        keychain_access_groups=_group_values(entitlements.get("keychain-access-groups")),
     )
 
 

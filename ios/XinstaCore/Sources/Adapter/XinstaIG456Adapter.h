@@ -30,6 +30,11 @@ NS_ASSUME_NONNULL_BEGIN
 @property (nonatomic, strong, readonly) XinstaCompatibilityReport *compatibilityReport;
 @property (nonatomic, assign, readonly) BOOL compatibilityAccepted;
 
+/// Exact binding resolved from the injected host metadata. Nil for an
+/// unrecognised identity, so downstream registry and diagnostic checks fail
+/// closed instead of falling back to the production binding.
+@property (nonatomic, copy, readonly, nullable) NSString *adapterIdentifier;
+
 /// YES only after the version-specific target class has been observed by the
 /// same evaluation that accepted the adapter. Never inferred from a string.
 @property (nonatomic, assign, readonly) BOOL targetRuntimeVerified;

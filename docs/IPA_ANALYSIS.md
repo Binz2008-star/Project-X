@@ -40,7 +40,7 @@ Non-guarantees, stated in every report:
 | `project_x/ipa/bundle.py` | Locates `Payload/*.app`, reads `Info.plist`, builds the identity, and inventories `.appex`, `.framework` and `.bundle` directories with their own plists and signature coverage. |
 | `project_x/ipa/collisions.py` | Resolves `@rpath`/`@executable_path` references against embedded frameworks, reports protected basenames, unresolved dependencies and duplicate basenames. It flags potential collisions before any injection; static basename analysis alone does not prove an injection will work. |
 | `project_x/ipa/signing.py` | Reads signature *metadata*: `CodeResources`, provisioning-profile summary, FairPlay `SC_Info/`, nested bundle coverage. Never verifies. |
-| `project_x/ipa/report.py` | The versioned JSON contract (`schema_version = "1.1"`) and severity-ordered findings. This is the interface Phase 2 registries should consume. |
+| `project_x/ipa/report.py` | The versioned JSON contract (`schema_version = "1.2"`) and severity-ordered findings. This is the interface Phase 2 registries should consume. |
 | `project_x/ipa/inspector.py` | Orchestration. The archive is opened once; parsing, raw-name validation, entry reads and hashing use the same descriptor. |
 | `scripts/inspect_ipa.py` | CLI: `--summary`, `--json`, `--no-hash`, `--fail-on-critical`, limit overrides. |
 
@@ -76,7 +76,8 @@ entirely. Both classic and ZIP64 end-of-central-directory records are parsed.
 - **A7-5 / signing names:** `nested_bundles_signed` is replaced by
   `nested_bundles_with_signature_metadata`, `app_signature_file_count` by
   `code_signature_entry_count`, and `is_xcode_managed` by `provisions_all_devices`. These
-  names describe metadata presence, not signature validity. The report schema is now `1.1`.
+  names describe metadata presence, not signature validity. The report schema was `1.1` at
+  that review and is `1.2` after the private-pilot identity additions.
 - **A7-6 / output safety:** `--json` writes to a temporary file in the destination directory.
   The input descriptor identity is captured before analysis and checked again immediately before
   publication. The report is published with a no-overwrite hard link; an existing target,
@@ -104,8 +105,11 @@ entirely. Both classic and ZIP64 end-of-central-directory records are parsed.
 | A7-R9 | Temporary-file cleanup removes only the inode captured from the original descriptor. A concurrent rename onto the temporary path is never unlinked, so the input archive survives even when the publication link fails. | Temporary-inode swapping race test that preserves the original archive bytes. |
 | A7-R10 | All temporary-file creation, write, link and cleanup `OSError`s reduce to fixed `OUTPUT_WRITE_FAILED`; output-parent failures no longer echo private paths or tracebacks. | Nonexistent private output directory and failing-cleanup tests. |
 
-Downstream consumers must accept schema `1.1`. No private field names, local paths or raw
-parser text are emitted by the new refusal codes.
+Downstream consumers must accept schema `1.2`; the Build Manager also accepts legacy `1.0`
+and `1.1` reports. Schema `1.2` adds bounded `identity.url_schemes` and provisioning-profile
+`app_groups` / `keychain_access_groups` / `entitlement_keys` summaries for private-pilot
+isolation checks, without copying profile values or parser text into findings. No private
+field names, local paths or raw parser text are emitted by the refusal codes.
 
 ## 4. Phase 2 foundation
 
