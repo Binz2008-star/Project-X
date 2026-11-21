@@ -20,6 +20,9 @@ Status values: **FIXED** (code, regression test and local verification present),
 | A7-R3 | FIXED | Independent re-review finding: publication race can no longer overwrite the archive with report bytes. | Monkeypatched publication-race test; static symlink test retained. |
 | A7-R4 | FIXED | Provisioning-profile `Name` and `ExpirationDate` are strictly typed; malformed values produce fixed `PLIST_INVALID` and cannot break JSON serialization. | Parametrised profile-value tests plus valid-date round-trip test. |
 | A7-R5 | FIXED | Analyzer CLI uses a safe argument parser and fixed `FILE_NOT_FOUND` text; raw arguments and private paths are never echoed. | Invalid-option, unknown-option and private-path missing-file CLI tests. |
+| A7-R6 | FIXED | Publication never unlinks the target; existing report/symlink targets are refused, closing the pre-unlink TOCTOU window. | Existing-target, symlink, no-unlink tracer and publication-race tests. |
+| A7-R7 | FIXED | All input-path I/O errors, not only `FileNotFoundError`, emit fixed refusal text without path or traceback. | Private-directory CLI test. |
+| A7-R8 | FIXED | Non-positive numeric limits produce fixed `INVALID_ARGUMENTS` instead of an uncaught `ValueError`. | Parametrised CLI limit tests. |
 
 ## PR #9 — Build Manager (B9)
 
