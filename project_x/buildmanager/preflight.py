@@ -2,7 +2,7 @@
 
 Inputs are limited to two JSON documents:
 
-* an owner authorization manifest; and
+* an unsigned owner declaration manifest (advisory only); and
 * an ``IpaInspectionReport`` (``schema_version`` 1.0) produced by the read-only
   analysis engine.
 
@@ -15,12 +15,15 @@ A successful preflight produces a *plan for review* whose
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any
 
 PLAN_SCHEMA_VERSION = "1.0"
-REPORT_SCHEMA_VERSION = "1.0"
 MANIFEST_SCHEMA_VERSION = "1.0"
+# Report 1.1 adds typed dependency references and fix codes; the consumed
+# fields are unchanged, so both versions are accepted with the same checks.
+ACCEPTED_REPORT_SCHEMA_VERSIONS = frozenset({"1.0", "1.1"})
 
 CORE_INSTALL_NAME = "@rpath/libXinstaCore.dylib"
 MINIMUM_IOS = (16, 3)
@@ -33,59 +36,93 @@ ALLOWED_BUNDLE_IDS = frozenset({"demo.owned"})
 ALLOWED_RIGHTS_BASIS = frozenset({"owned-test-package"})
 ALLOWED_ARCHITECTURES = frozenset({"arm64", "arm64e"})
 
-# Finding codes emitted by the schema 1.0 read-only analyzer. Only these fixed
-# literals may be copied into a preflight result; anything else is untrusted
-# input and must never reach output (it could contain a path or a secret).
-KNOWN_ANALYSIS_CODES = frozenset(
-    {
-        "ABSOLUTE_ENTRY_PATH",
-        "ARCHIVE_TOO_LARGE",
-        "BACKSLASH_ENTRY_PATH",
-        "COMPRESSION_RATIO_ABNORMAL",
-        "CORRUPT_ENTRY",
-        "DUPLICATE_ENTRY_NAME",
-        "EMPTY_ARCHIVE",
-        "EMPTY_ENTRY_NAME",
-        "ENCRYPTED_ENTRY",
-        "ENTRY_READ_TOO_LARGE",
-        "ENTRY_TOO_LARGE",
-        "EXECUTABLE_NOT_PRESENT",
-        "FAIRPLAY_METADATA_PRESENT",
-        "FRAMEWORK_NAME_COLLISION",
-        "MAIN_BINARY_DECRYPTED",
-        "MAIN_BINARY_ENCRYPTED",
-        "MAIN_BINARY_UNPARSEABLE",
-        "MALFORMED_CENTRAL_DIRECTORY",
-        "MH_BUNDLE",
-        "MH_CORE",
-        "MH_DYLIB",
-        "MH_DYLIB_STUB",
-        "MH_DYLINKER",
-        "MH_EXECUTE",
-        "MH_FVMLIB",
-        "MH_KEXT_BUNDLE",
-        "MH_OBJECT",
-        "MH_PRELOAD",
-        "MIN_OS_MISMATCH",
-        "MISSING_BUNDLE_ID",
-        "MISSING_EXECUTABLE_NAME",
-        "NO_CODE_SIGNATURE",
-        "NO_EMBEDDED_EXTENSIONS",
-        "NON_ARM64_ARCHITECTURE",
-        "NOT_A_ZIP",
-        "NUL_IN_ENTRY_NAME",
-        "PATH_TRAVERSAL",
-        "PROTECTED_FRAMEWORK_BASENAMES",
-        "PROVISIONING_PROFILE_PRESENT",
-        "SYMLINK_ENTRY",
-        "TOO_MANY_ENTRIES",
-        "UNEXPECTED_EXTENSION_IDENTIFIER",
-        "UNREADABLE_ARCHIVE",
-        "UNRESOLVED_RPATH_DEPENDENCY",
-        "UNSIGNED_NESTED_BUNDLE",
-        "UNSUPPORTED_COMPRESSION",
-    }
+# Bounded, output-safe identity text. Rejections are reported with fixed codes
+# and never include the rejected value.
+MAX_IDENTITY_TEXT_LENGTH = 256
+UNSAFE_IDENTITY_CODE = "UNSAFE_IDENTITY_STRING"
+REPORT_INCONSISTENT_CODE = "REPORT_INCONSISTENT"
+_SECRET_MARKERS = (
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "api_key",
+    "apikey",
+    "private_key",
+    "privatekey",
+    "BEGIN PRIVATE KEY",
+    "BEGIN RSA PRIVATE KEY",
 )
+_PATH_SEPARATORS = ("/", "\\")
+_BIDI_RANGES = (
+    ("\u200e", "\u200f"),
+    ("\u202a", "\u202e"),
+    ("\u2066", "\u2069"),
+    ("\ufeff", "\ufeff"),
+)
+
+# Legacy alias used by older Mach-O producers; CPU subtype 1 is the same
+# arm64v8 family member. Both are normalised to the canonical ``arm64`` name.
+ARCH_ALIASES = frozenset({"arm64v8"})
+ARM64_SUBTYPE_NAMES = {0: "arm64", 1: "arm64", 2: "arm64e"}
+
+# Expected severity for every code the read-only analyzer can emit. The report
+# never supplies the trusted severity: it is recomputed from this map and a
+# mismatch fails closed with REPORT_INCONSISTENT. Raw finding context is ignored.
+EXPECTED_SEVERITIES: dict[str, str] = {
+    "ABSOLUTE_ENTRY_PATH": "critical",
+    "AMBIGUOUS_APPLICATION_ROOT": "critical",
+    "ARCHIVE_CHANGED_DURING_ANALYSIS": "critical",
+    "ARCHIVE_TOO_LARGE": "critical",
+    "BACKSLASH_ENTRY_PATH": "critical",
+    "COMPRESSION_RATIO_ABNORMAL": "critical",
+    "CORRUPT_ENTRY": "critical",
+    "DUPLICATE_ENTRY_NAME": "warning",
+    "EMPTY_ARCHIVE": "critical",
+    "EMPTY_ENTRY_NAME": "critical",
+    "ENCRYPTED_ENTRY": "critical",
+    "ENTRY_READ_TOO_LARGE": "critical",
+    "ENTRY_TOO_LARGE": "critical",
+    "EXECUTABLE_NOT_PRESENT": "critical",
+    "FAIRPLAY_METADATA_PRESENT": "info",
+    "FRAMEWORK_NAME_COLLISION": "warning",
+    "INVALID_INFO_PLIST_VALUE": "critical",
+    "MAIN_BINARY_DECRYPTED": "info",
+    "MAIN_BINARY_ENCRYPTED": "warning",
+    "MAIN_BINARY_UNPARSEABLE": "critical",
+    "MALFORMED_CENTRAL_DIRECTORY": "critical",
+    "MH_BUNDLE": "critical",
+    "MH_CORE": "critical",
+    "MH_DYLIB": "critical",
+    "MH_DYLIB_STUB": "critical",
+    "MH_DYLINKER": "critical",
+    "MH_EXECUTE": "info",
+    "MH_FVMLIB": "critical",
+    "MH_KEXT_BUNDLE": "critical",
+    "MH_OBJECT": "critical",
+    "MH_PRELOAD": "critical",
+    "MIN_OS_MISMATCH": "warning",
+    "MISSING_BUNDLE_ID": "critical",
+    "MISSING_EXECUTABLE_NAME": "critical",
+    "NO_CODE_SIGNATURE": "warning",
+    "NO_EMBEDDED_EXTENSIONS": "info",
+    "NON_ARM64_ARCHITECTURE": "warning",
+    "NOT_A_ZIP": "critical",
+    "NUL_IN_ENTRY_NAME": "critical",
+    "PATH_TRAVERSAL": "critical",
+    "PROTECTED_FRAMEWORK_BASENAMES": "info",
+    "PROVISIONING_PROFILE_PRESENT": "info",
+    "PROVISIONING_PROFILE_UNREADABLE": "warning",
+    "SYMLINK_ENTRY": "warning",
+    "TOO_MANY_ENTRIES": "critical",
+    "UNEXPECTED_EXTENSION_IDENTIFIER": "warning",
+    "UNREADABLE_ARCHIVE": "critical",
+    "UNRESOLVED_RPATH_DEPENDENCY": "critical",
+    "UNSIGNED_NESTED_BUNDLE": "warning",
+    "UNSUPPORTED_COMPRESSION": "critical",
+    "WEAK_UNRESOLVED_RPATH_DEPENDENCY": "warning",
+}
+KNOWN_ANALYSIS_CODES = frozenset(EXPECTED_SEVERITIES)
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _AUTHORIZATION_ID_RE = re.compile(r"^[A-Z0-9][A-Z0-9._-]{2,63}$")
@@ -109,6 +146,14 @@ _WARN = "warning"
 
 class PreflightInputError(ValueError):
     """The manifest or inspection report does not satisfy the input contract."""
+
+
+class UnsafeIdentityError(PreflightInputError):
+    """A copied identity-like string failed the bounded, output-safe check."""
+
+
+class ReportInconsistentError(PreflightInputError):
+    """A report finding severity disagrees with its known finding code."""
 
 
 @dataclass(frozen=True)
@@ -151,16 +196,16 @@ class AuthorizationManifest:
             )
         if data["owner_authorized"] is not True:
             raise PreflightInputError("manifest.owner_authorized must be boolean true")
-        authorization_id = _string(data["authorization_id"], "manifest.authorization_id")
+        authorization_id = _safe_text(data["authorization_id"], "manifest.authorization_id")
         if not _AUTHORIZATION_ID_RE.match(authorization_id):
             raise PreflightInputError("manifest.authorization_id has an invalid format")
 
         identity = _mapping(data["expected_identity"], "manifest.expected_identity")
         if frozenset(identity) != _IDENTITY_KEYS:
             raise PreflightInputError("manifest.expected_identity keys must be exact")
-        bundle_id = _string(identity["bundle_id"], "manifest.expected_identity.bundle_id")
-        version = _string(identity["version"], "manifest.expected_identity.version")
-        build_number = _string(
+        bundle_id = _safe_text(identity["bundle_id"], "manifest.expected_identity.bundle_id")
+        version = _safe_text(identity["version"], "manifest.expected_identity.version")
+        build_number = _safe_text(
             identity["build_number"], "manifest.expected_identity.build_number"
         )
         for field, text in (
@@ -173,12 +218,12 @@ class AuthorizationManifest:
                     f"manifest.expected_identity.{field} must be an exact value"
                 )
 
-        expected_sha256 = _string(data["expected_sha256"], "manifest.expected_sha256")
+        expected_sha256 = _safe_text(data["expected_sha256"], "manifest.expected_sha256")
         if not _SHA256_RE.match(expected_sha256):
             raise PreflightInputError(
                 "manifest.expected_sha256 must be 64 lower-case hex characters"
             )
-        rights_basis = _string(data["rights_basis"], "manifest.rights_basis")
+        rights_basis = _safe_text(data["rights_basis"], "manifest.rights_basis")
         if rights_basis not in ALLOWED_RIGHTS_BASIS:
             raise PreflightInputError("manifest.rights_basis is not allowed")
 
@@ -212,11 +257,41 @@ def evaluate(manifest: Any, report: Any) -> PreflightResult:
     """Evaluate an authorization manifest against a versioned inspection report."""
     try:
         auth = AuthorizationManifest.from_dict(manifest)
+    except UnsafeIdentityError:
+        return _rejected(
+            [
+                Finding(
+                    UNSAFE_IDENTITY_CODE,
+                    _BLK,
+                    "manifest contains an unsafe identity-like value",
+                )
+            ]
+        )
     except PreflightInputError as exc:
         return _rejected([Finding("MANIFEST_INVALID", _BLK, str(exc))])
 
     try:
         _validate_report(report)
+    except UnsafeIdentityError:
+        return _rejected(
+            [
+                Finding(
+                    UNSAFE_IDENTITY_CODE,
+                    _BLK,
+                    "report contains an unsafe identity-like value",
+                )
+            ]
+        )
+    except ReportInconsistentError:
+        return _rejected(
+            [
+                Finding(
+                    REPORT_INCONSISTENT_CODE,
+                    _BLK,
+                    "report finding severity disagrees with the known finding code",
+                )
+            ]
+        )
     except PreflightInputError as exc:
         return _rejected([Finding("REPORT_INVALID", _BLK, str(exc))])
 
@@ -269,8 +344,12 @@ def evaluate(manifest: Any, report: Any) -> PreflightResult:
     _check_slices(slices, findings)
 
     analysis_findings = report["findings"]
-    warning_codes = sorted({f["code"] for f in analysis_findings if f["severity"] == _WARN})
-    critical_codes = sorted({f["code"] for f in analysis_findings if f["severity"] == "critical"})
+    warning_codes = sorted(
+        {f["code"] for f in analysis_findings if EXPECTED_SEVERITIES[f["code"]] == _WARN}
+    )
+    critical_codes = sorted(
+        {f["code"] for f in analysis_findings if EXPECTED_SEVERITIES[f["code"]] == "critical"}
+    )
     if critical_codes:
         findings.append(
             Finding(
@@ -332,10 +411,46 @@ def _mapping(value: Any, path: str) -> dict:
     return value
 
 
-def _string(value: Any, path: str) -> str:
+def _safe_text(value: Any, path: str) -> str:
+    """Validate copied identity-like text without ever returning it in an error.
+
+    Every rejection is a fixed code at the call site; the exception message only
+    names the field, never the rejected value.
+    """
     if not isinstance(value, str) or not value:
         raise PreflightInputError(f"{path} must be a non-empty string")
+    if len(value) > MAX_IDENTITY_TEXT_LENGTH:
+        raise UnsafeIdentityError(f"{path} is too long")
+    folded = value.lower()
+    if any(token in folded for token in _PATH_SEPARATORS):
+        raise UnsafeIdentityError(f"{path} contains a path separator")
+    if any(start <= char <= end for char in value for start, end in _BIDI_RANGES):
+        raise UnsafeIdentityError(f"{path} contains a bidi control")
+    for char in value:
+        if unicodedata.category(char) in {"Cc", "Cf", "Zl", "Zp"}:
+            raise UnsafeIdentityError(f"{path} contains a control character")
+    if any(token in folded for token in _SECRET_MARKERS):
+        raise UnsafeIdentityError(f"{path} looks like a secret")
     return value
+
+
+def _normalise_arch(slice_record: dict) -> str | None:
+    """Return the canonical arm64-family name or None when the slice is unsafe."""
+    arch = slice_record.get("arch")
+    if not isinstance(arch, str) or not arch:
+        return None
+    candidate = arch.strip().lower()
+    # A subtype only refines an arm64-family declaration; it must never turn an
+    # explicitly unsupported architecture into an accepted one.
+    if candidate in ALLOWED_ARCHITECTURES or candidate in ARCH_ALIASES:
+        subtype = slice_record.get("cpu_subtype")
+        if isinstance(subtype, int) and not isinstance(subtype, bool):
+            mapped = ARM64_SUBTYPE_NAMES.get(subtype & 0xFF)
+            if mapped is not None:
+                candidate = mapped
+    if candidate in ARCH_ALIASES:
+        candidate = "arm64"
+    return candidate if candidate in ALLOWED_ARCHITECTURES else None
 
 
 def _version_at_least(value: Any, minimum: tuple[int, ...]) -> bool:
@@ -359,7 +474,7 @@ def _check_slices(slices: Any, findings: list[Finding]) -> None:
         if not isinstance(item, dict):
             _add_once(seen, findings, "MAIN_EXECUTABLE_SLICE_INVALID", _BLK, "malformed Mach-O slice")
             continue
-        if item.get("arch") not in ALLOWED_ARCHITECTURES:
+        if _normalise_arch(item) is None:
             _add_once(
                 seen,
                 findings,
@@ -393,18 +508,30 @@ def _add_once(
 
 def _validate_report(report: Any) -> None:
     data = _mapping(report, "report")
-    if data.get("schema_version") != REPORT_SCHEMA_VERSION:
-        raise PreflightInputError("report.schema_version must be '1.0'")
+    if data.get("schema_version") not in ACCEPTED_REPORT_SCHEMA_VERSIONS:
+        raise PreflightInputError("report.schema_version is not allowlisted")
 
     identity = _mapping(data.get("identity"), "report.identity")
     for key in _IDENTITY_KEYS | {"minimum_os", "executable"}:
         if key not in identity:
             raise PreflightInputError(f"report.identity.{key} is required")
-    for key in ("bundle_id", "version", "build_number", "minimum_os", "executable"):
-        if identity[key] is not None and not isinstance(identity[key], str):
-            raise PreflightInputError(f"report.identity.{key} must be a string or null")
+    for key in ("bundle_id", "version", "build_number", "minimum_os"):
+        if identity[key] is not None:
+            _safe_text(identity[key], f"report.identity.{key}")
+    for key in ("name", "display_name"):
+        if identity.get(key) is not None:
+            _safe_text(identity[key], f"report.identity.{key}")
+    # CFBundleExecutable is a bundle-relative path by design; it is never copied
+    # into plan output, but it still gets the control/bidi/secret checks.
+    if identity["executable"] is not None:
+        executable = identity["executable"]
+        if not isinstance(executable, str) or not executable:
+            raise PreflightInputError("report.identity.executable must be a string or null")
+        _safe_text(executable.replace("/", "").replace("\\", ""), "report.identity.executable")
 
     artifact = _mapping(data.get("artifact"), "report.artifact")
+    if isinstance(artifact.get("sha256"), str):
+        _safe_text(artifact["sha256"], "report.artifact.sha256")
     if not isinstance(artifact.get("sha256"), str) or not _SHA256_RE.match(artifact["sha256"]):
         raise PreflightInputError("report.artifact.sha256 must be 64 lower-case hex characters")
 
@@ -424,8 +551,9 @@ def _validate_report(report: Any) -> None:
         code = entry.get("code")
         if not isinstance(code, str) or code not in KNOWN_ANALYSIS_CODES:
             raise PreflightInputError("report.findings[] has an unknown finding code")
-        if entry.get("severity") not in {"critical", "warning", "info"}:
-            raise PreflightInputError("report.findings[] has an invalid severity")
+        # The report's severity and context are untrusted; never copy either.
+        if entry.get("severity") != EXPECTED_SEVERITIES[code]:
+            raise ReportInconsistentError("report.findings[] severity is inconsistent")
 
     signing = _mapping(data.get("signing"), "report.signing")
     _mapping(signing.get("verification"), "report.signing.verification")
@@ -453,6 +581,8 @@ def _build_plan(
         "authorization": {
             "authorization_id": auth.authorization_id,
             "rights_basis": auth.rights_basis,
+            "verification": "advisory_declaration_only",
+            "cryptographically_verified": False,
         },
         "package": {
             "bundle_id": identity["bundle_id"],
@@ -474,9 +604,12 @@ def _build_plan(
                 "action": "validated the versioned read-only inspection report",
             },
             {
-                "id": "verify_owner_authorization",
+                "id": "check_owner_declaration",
                 "status": "passed",
-                "action": "matched the owner manifest to the inspected package and hash",
+                "action": (
+                    "matched the unsigned owner declaration to the inspected package "
+                    "and hash; this is not proof of authorization"
+                ),
             },
             {
                 "id": "stage_core_dylib",
@@ -522,5 +655,7 @@ def _build_plan(
             "no IPA is opened, extracted, modified, signed, or installed by this tool",
             "no hook, swizzle, injection method, or host executable change is validated",
             "static inspection is not a malware verdict or a signature verification",
+            "the unsigned owner declaration is advisory only, not proof of authorization",
+            "execution requires a separate, cryptographically verified permit outside this plan",
         ],
     }
