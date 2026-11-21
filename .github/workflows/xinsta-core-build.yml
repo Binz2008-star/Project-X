@@ -113,3 +113,20 @@ jobs:
           echo "$INSTALL_NAMES"
           grep -qF '@rpath/libXinstaCore.dylib' <<<"$INSTALL_NAMES"
           echo "Xinsta Core artifact verified: unsigned arm64 iOS 16.3 Mach-O dylib"
+
+      - name: Record dylib checksum
+        run: |
+          set -euo pipefail
+          shasum -a 256 ios/XinstaCore/build/libXinstaCore.dylib \
+            > ios/XinstaCore/build/libXinstaCore.dylib.sha256
+          cat ios/XinstaCore/build/libXinstaCore.dylib.sha256
+
+      - name: Upload unsigned dylib artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libXinstaCore-unsigned-arm64-ios16.3
+          path: |
+            ios/XinstaCore/build/libXinstaCore.dylib
+            ios/XinstaCore/build/libXinstaCore.dylib.sha256
+          if-no-files-found: error
+          retention-days: 30
