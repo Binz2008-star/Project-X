@@ -23,10 +23,14 @@ The commands below use macOS because that is the currently reviewed toolchain,
 not because installation is theoretically macOS-only. On the Windows host
 checked in this execution phase, Apple Mobile Device Service and iTunes COM were
 available, but the attached-device count and present-only Apple PnP device count
-were both `0`; Sideloadly, `ios-deploy`, signing identities and provisioning
-profiles were absent. Windows is therefore **not currently ready** to complete
-the installation flow. macOS tooling remains a candidate requirement only until
-an independently approved Windows installer path exists.
+were both `0`. A fresh read-only check also found Sideloadly absent (no command,
+standard install directory, registry entry, shortcut, or running process), along
+with no `ios-deploy`, signing identities, or provisioning profiles. Windows is
+therefore **not currently ready** to complete the installation flow. macOS
+tooling remains a candidate requirement only until an independently approved
+Windows installer path exists. The separately signed pilot identity and the
+Windows/Sideloadly plan are tracked in `docs/IG456_PRIVATE_PILOT.md`; do not
+substitute this original-identity runbook for that pilot path.
 
 ## Pinned inputs
 

@@ -169,6 +169,14 @@ display name, and rpath status. On code head
 pinned IPA and downloaded dylib reported `execution_permitted=false` with all
 four execution steps blocked.
 
+A fresh Windows preparation check confirmed that the repository still contains no
+signing, repackaging, Sideloadly integration, or installer implementation: the
+`project_x/packaging` module explicitly never signs, writes, or installs an IPA,
+and the only IPA `zipfile` writers are test fixtures. Sideloadly was not found on
+the host. The pipeline therefore cannot produce an independently signed,
+installable `Xinsta.ipa`; it can only produce the reviewed dry-run plan. See
+`docs/IG456_PRIVATE_PILOT.md` for the gated practical plan.
+
 ### Independent load-policy review
 
 A fresh read-only review of head `114b3b3ac524957982f202b5e580199ba9038cc5`

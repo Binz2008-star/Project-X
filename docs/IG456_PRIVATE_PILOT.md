@@ -184,6 +184,63 @@ currently available. A macOS host with `ios-deploy` and a valid development
 profile remains the reviewed candidate; it is `BLOCKED` pending owner-approved
 signing inputs and device scope.
 
+## Windows/Sideloadly preparation check — fresh read-only pass
+
+This pass did not install or launch Sideloadly, sign, repackage, install, or touch
+a device. At the verified code head `3c38ca9` and current branch, read-only checks
+found:
+
+| Check | Result |
+| --- | --- |
+| Sideloadly command on PATH | `FAILED` — not found |
+| Sideloadly standard install directories | `FAILED` — none present |
+| Sideloadly registry entries, shortcuts, running processes | `FAILED` — none found |
+| CI at docs head `cabbaf7` | `VERIFIED` green: API run `44914146320`, macOS run `44914146303` |
+| Source IPA hash | `VERIFIED`: `665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131` |
+| Core artifact hash | `VERIFIED`: `bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff` |
+| Dry-run planner | `VERIFIED`: `execution_permitted=false`; all four signing/repackage/install steps blocked |
+| Packaging pipeline output | `BLOCKED`: no signing, repackaging, Sideloadly integration, or installer implementation in the repository |
+| iPhone visibility | `BLOCKED`: iTunes device count `0`; no present Apple USB device; iOS/Developer Mode `NOT TESTED` |
+| Signing inputs | `BLOCKED`: `0` code-signing certificates, `0` provisioning profiles, `0` iOS deployment/signing tools found |
+
+Sideloadly is therefore **not installed on this Windows host** and cannot be used
+in the current state. Installing it, supplying an Apple signing identity, and
+connecting the iPhone require explicit owner approval and must not be done from
+repository code. Never paste an Apple ID, app-specific password, UDID,
+certificate, profile, or private device log into the repository or chat.
+
+### Shortest practical plan for `Xinsta.ipa`
+
+This is a gated plan, not an execution permit:
+
+1. **Owner gate:** approve the exact code head, the separate pilot identity, the
+   registered private device, and the Sideloadly version/source. Supply signing
+   inputs through a secrets manager, never in chat or the repository.
+2. **Host gate:** install and review Sideloadly on an owner-controlled Windows
+   host; connect and trust the iPhone read-only; confirm iOS 16.3+ and Developer
+   Mode through an approved path; record the result without UDID or Apple ID.
+3. **Inputs:** keep the pinned source IPA and the exact CI dylib artifact;
+   reverify both hashes and rerun the dry-run planner. Stop unless
+   `execution_permitted=false` and all execution steps remain blocked.
+4. **Build outside the repository:** on the reviewed host, make a disposable copy
+   of the source IPA. Rewrite the 8 extension identifiers, bundle ID, display
+   name, URL schemes, App Group prefix, and entitlements to the pinned pilot
+   values. Stage the dylib in `Frameworks`; insert the Core load command only if
+   absent; do not add a duplicate rpath. Never modify the original IPA.
+5. **Sign:** sign the dylib, nested bundles/extensions, and app with the pilot
+   development profile. Sideloadly may perform final signing, but all nested
+   bundles must be re-signed and entitlements must match the pilot declaration.
+6. **Analyze:** repackage into a distinct `Xinsta.ipa`; run the read-only analyzer
+   and Build Manager on the real output. Stop on any blocker; keep the plan
+   dry-run-only.
+7. **Device test:** install only the pilot alongside production; launch once;
+   capture only the pilot process name and `[XinstaCore] init=`; do not log in or
+   exercise features; confirm the production app remains installed; then
+   uninstall the pilot using the approved Sideloadly removal path.
+
+Current status: steps 1–3 are `VERIFIED`/`BLOCKED` as noted above; steps 4–7 are
+`BLOCKED`/`NOT TESTED`. No installable `Xinsta.ipa` exists yet.
+
 ## Candidate final installation procedure
 
 Every step below is `BLOCKED` until an independent reviewer approves the exact
