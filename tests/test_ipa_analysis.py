@@ -11,6 +11,7 @@ import os
 import plistlib
 import struct
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -921,6 +922,7 @@ def test_valid_provisioning_profile_summary_uses_accurate_field_names(tmp_path: 
         {
             "Name": "Demo Profile",
             "TeamIdentifier": ["TEAM123"],
+            "ExpirationDate": datetime(2026, 12, 31, 23, 59, 59),
             "ProvisionsAllDevices": True,
         },
         fmt=plistlib.FMT_XML,
@@ -934,11 +936,74 @@ def test_valid_provisioning_profile_summary_uses_accurate_field_names(tmp_path: 
     assert report.signing.provisioning_profile.provisions_all_devices is True
     payload = report.to_dict()["signing"]["provisioning_profile"]
     assert "is_xcode_managed" not in payload
+    assert payload["name"] == "Demo Profile"
+    assert payload["expires_at"] == "2026-12-31T23:59:59"
     assert payload["provisions_all_devices"] is True
     signing = report.to_dict()["signing"]
     assert "app_signature_file_count" not in signing
     assert "nested_bundles_signed" not in signing
     assert signing["code_signature_entry_count"] == 1
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "case_id"),
+    [
+        pytest.param("Name", 123, "name-int", id="name-int"),
+        pytest.param("Name", {"unexpected": "value"}, "name-dict", id="name-dict"),
+        pytest.param("Name", b"bytes", "name-bytes", id="name-bytes"),
+        pytest.param("ExpirationDate", b"\x01\x02", "expires-bytes", id="expires-bytes"),
+        pytest.param("ExpirationDate", {"unexpected": "value"}, "expires-dict", id="expires-dict"),
+        pytest.param("ExpirationDate", [2026, 1, 1], "expires-list", id="expires-list"),
+    ],
+)
+def test_malformed_profile_summary_values_are_refused_without_breaking_json(
+    tmp_path: Path, capsys, field: str, value, case_id: str
+):
+    plist = plistlib.dumps(
+        {"TeamIdentifier": ["TEAM123"], field: value},
+        fmt=plistlib.FMT_XML,
+    )
+    entries = base_entries()
+    entries[APP + "embedded.mobileprovision"] = b"CMS-header" + plist + b"CMS-footer"
+    path = write_ipa(tmp_path / f"MalformedProfile-{case_id}.ipa", entries)
+
+    report = inspect_ipa(path)
+
+    profile_finding = finding(report, "PROVISIONING_PROFILE_UNREADABLE")
+    assert profile_finding is not None
+    assert profile_finding.context["reason"] == "PLIST_INVALID"
+    assert report.signing.provisioning_profile is None
+    assert report.to_dict()["signing"]["provisioning_profile"] is None
+    assert json.loads(report.to_json())["signing"]["provisioning_profile"] is None
+
+    output = tmp_path / f"MalformedProfile-{case_id}.json"
+    assert cli_main([str(path), "--json", str(output), "--summary"]) == 0
+    captured = capsys.readouterr()
+    assert "Traceback" not in captured.out + captured.err
+    assert json.loads(output.read_text(encoding="utf-8"))["signing"]["provisioning_profile"] is None
+
+
+def test_cli_refusals_do_not_echo_private_paths(tmp_path: Path, capsys):
+    private = tmp_path / "private-family-photos"
+    missing = private / "missing.ipa"
+
+    capsys.readouterr()
+    assert cli_main([str(missing)]) == 2
+    captured = capsys.readouterr()
+    assert "FILE_NOT_FOUND" in captured.err
+    assert "private-family-photos" not in captured.out + captured.err
+
+    invalid_invocations = [
+        [str(missing), "--max-entries", str(private / "not-an-int")],
+        [str(missing), "--max-total-bytes", str(private / "not-an-int")],
+        [str(missing), "--private-family-photos", str(private / "value")],
+    ]
+    for arguments in invalid_invocations:
+        capsys.readouterr()
+        assert cli_main(arguments) == 2
+        captured = capsys.readouterr()
+        assert "INVALID_ARGUMENTS" in captured.err
+        assert "private-family-photos" not in captured.out + captured.err
 
 
 def test_weak_unresolved_rpath_dependency_is_a_warning_with_kind(tmp_path: Path):

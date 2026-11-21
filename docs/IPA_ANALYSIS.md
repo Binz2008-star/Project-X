@@ -96,6 +96,8 @@ entirely. Both classic and ZIP64 end-of-central-directory records are parsed.
 | A7-R1 | Nested `.appex`/`.framework`/`.bundle` plists now use the same typed string validation as the main `Info.plist`, so invalid identity values cannot crash the CLI or produce non-string report fields. | Parametrised nested-plist tests plus CLI mapping test. |
 | A7-R2 | App-root detection no longer requires an `Info.plist` to infer a root; a second top-level `.app/` directory is ambiguous even when it contains only arbitrary files. | Root-without-plist inspection and CLI tests; existing nested-app counter-test retained. |
 | A7-R3 | Report publication rechecks the captured input identity, uses a no-overwrite hard link, and refuses to replace a target recreated during publication. | Race test that renames the input onto the output immediately before publication; static symlink test retained. |
+| A7-R4 | Provisioning-profile `Name` and `ExpirationDate` are strictly typed. A parseable profile with non-string/date values is refused with the fixed `PLIST_INVALID` reason; `to_dict()` cannot emit non-string fields or raise on `to_json()`. | Parametrised malformed-profile tests plus a valid-date round-trip test. |
+| A7-R5 | The CLI uses a safe argument parser and a fixed `FILE_NOT_FOUND` message; raw arguments, unknown options and private paths are never echoed. | CLI tests for invalid numeric options, unknown options and missing files under a private-looking directory. |
 
 Downstream consumers must accept schema `1.1`. No private field names, local paths or raw
 parser text are emitted by the new refusal codes.

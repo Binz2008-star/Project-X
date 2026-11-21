@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import plistlib
 from dataclasses import dataclass, field
+from datetime import datetime
 
 from .safety import SafeArchive
 
@@ -27,18 +28,17 @@ class SigningError(ValueError):
 class ProvisioningProfileSummary:
     name: str | None
     team_identifiers: tuple[str, ...]
-    expires_at: object | None
+    expires_at: str | None
     provisioned_device_count: int | None
     entitlement_keys: tuple[str, ...]
     platforms: tuple[str, ...]
     provisions_all_devices: bool | None
 
     def to_dict(self) -> dict:
-        expires = self.expires_at
-        if hasattr(expires, "isoformat"):
-            expires = expires.isoformat()
+        name = self.name if isinstance(self.name, str) and self.name else None
+        expires = self.expires_at if isinstance(self.expires_at, str) and self.expires_at else None
         return {
-            "name": self.name,
+            "name": name,
             "team_identifiers": list(self.team_identifiers),
             "expires_at": expires,
             "provisioned_device_count": self.provisioned_device_count,
@@ -103,10 +103,21 @@ def _summarise_profile(profile: dict) -> ProvisioningProfileSummary:
     teams = profile.get("TeamIdentifier") or []
     platforms = profile.get("Platform") or []
     all_devices = profile.get("ProvisionsAllDevices")
+
+    name = profile.get("Name")
+    if name is not None and (not isinstance(name, str) or not name):
+        raise SigningError("PLIST_INVALID")
+
+    expiration = profile.get("ExpirationDate")
+    if expiration is not None:
+        if not isinstance(expiration, datetime):
+            raise SigningError("PLIST_INVALID")
+        expiration = expiration.isoformat()
+
     return ProvisioningProfileSummary(
-        name=profile.get("Name"),
+        name=name,
         team_identifiers=tuple(str(t) for t in teams) if isinstance(teams, list) else (str(teams),),
-        expires_at=profile.get("ExpirationDate"),
+        expires_at=expiration,
         provisioned_device_count=len(devices) if isinstance(devices, list) else None,
         entitlement_keys=tuple(sorted(str(k) for k in entitlements)) if isinstance(entitlements, dict) else (),
         platforms=tuple(str(p) for p in platforms) if isinstance(platforms, list) else (str(platforms),),
@@ -149,7 +160,12 @@ def inspect_signing(
         if raw is not None:
             parsed = extract_embedded_plist(raw)
             if parsed is not None:
-                profile_summary = _summarise_profile(parsed)
+                try:
+                    profile_summary = _summarise_profile(parsed)
+                except SigningError:
+                    # Typed-field failures use the same fixed reason as an
+                    # unparseable plist; no value from the profile is echoed.
+                    profile_reason = "PLIST_INVALID"
             else:
                 profile_reason = _profile_parse_reason(raw)
 
