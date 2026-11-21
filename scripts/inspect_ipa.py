@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 import tempfile
 from pathlib import Path
@@ -69,7 +70,7 @@ def _output_collides(
     try:
         if Path(input_path).resolve() == Path(output_path).resolve():
             return True
-    except OSError:
+    except (OSError, RuntimeError):
         pass
     if source_identity is not None and source_identity == target_identity:
         return True
@@ -77,6 +78,41 @@ def _output_collides(
         return os.path.samefile(input_path, output_path)
     except OSError:
         return False
+
+
+def _descriptor_identity(descriptor: int) -> tuple[int, int] | None:
+    try:
+        info = os.fstat(descriptor)
+    except OSError:
+        return None
+    return (info.st_dev, info.st_ino)
+
+
+def _temporary_is_unchanged(path: Path, identity: tuple[int, int] | None) -> bool:
+    if identity is None:
+        return False
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    return (
+        (info.st_dev, info.st_ino) == identity
+        and stat.S_ISREG(info.st_mode)
+    )
+
+
+def _cleanup_temporary(path: Path, identity: tuple[int, int] | None) -> None:
+    """Remove only the originally created temporary inode.
+
+    If a concurrent rename replaced the temporary path with another inode, the
+    path is left alone: unlinking it could destroy the last copy of input bytes.
+    """
+    if not _temporary_is_unchanged(path, identity):
+        return
+    try:
+        path.unlink()
+    except OSError:
+        pass
 
 
 def _write_report(
@@ -90,18 +126,33 @@ def _write_report(
 
     A temporary file is created in the destination directory and published with
     a no-overwrite hard link. The target is never removed: an existing target,
-    including a symlink, is refused. If a concurrent rename places the input
-    archive at the target after the final check, the link fails and the archive
-    is left untouched instead of being replaced by report bytes.
+    including a symlink, is refused. Cleanup unlinks only the inode captured
+    from the original temporary descriptor, so a concurrent rename cannot turn
+    cleanup into deletion of the input archive. Any path-related OSError is
+    reduced to a fixed publication failure without echoing caller-controlled
+    text.
     """
     if _output_collides(input_path, output_path, input_identity):
         raise OutputCollisionError
     target = Path(output_path)
-    descriptor, temporary_name = tempfile.mkstemp(prefix=".inspect-ipa-", dir=str(target.parent))
-    temporary = Path(temporary_name)
+    temporary: Path | None = None
+    temporary_identity: tuple[int, int] | None = None
+    descriptor = -1
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            handle.write(payload + "\n")
+        try:
+            descriptor, temporary_name = tempfile.mkstemp(
+                prefix=".inspect-ipa-", dir=str(target.parent)
+            )
+            temporary = Path(temporary_name)
+            temporary_identity = _descriptor_identity(descriptor)
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+                descriptor = -1
+                handle.write(payload + "\n")
+        except OSError as exc:
+            raise OutputPublishError from exc
+
+        if not _temporary_is_unchanged(temporary, temporary_identity):
+            raise OutputPublishError
         if _output_collides(input_path, output_path, input_identity):
             raise OutputCollisionError
         try:
@@ -115,8 +166,13 @@ def _write_report(
         except OSError as exc:
             raise OutputPublishError from exc
     finally:
-        if temporary.exists():
-            temporary.unlink()
+        if descriptor != -1:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        if temporary is not None:
+            _cleanup_temporary(temporary, temporary_identity)
 
 
 def _summary(report) -> str:
@@ -230,7 +286,7 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        except OutputPublishError:
+        except (OutputPublishError, OSError):
             print(
                 "REFUSED [OUTPUT_WRITE_FAILED] the report could not be published safely",
                 file=sys.stderr,
