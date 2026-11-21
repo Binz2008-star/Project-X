@@ -47,18 +47,52 @@ implements those selectors, that DLInsta hooks them, or that a hook is safe.
 
 ### 2. Class and method reference confirmed
 
-- The target class name was recovered from `__objc_classlist` → `class_ro` →
-  class-name metadata in all three main executables after accounting for modern
-  arm64 chained-fixup pointer tagging. `VERIFIED`.
-- The three table-view selectors are present as strings and selector references
-  in all three main executables. `VERIFIED`.
-- Ownership of each selector by `IGProfileSheetTableViewController` could not be
-  resolved because the relevant method lists use relative offsets that the
-  read-only Python inspector does not fully decode. This is a tooling limit, not
-  evidence of absence: `BLOCKED`.
-- DLInsta category names `SafeGetters`, `DLTTrim`, and `DLTMore` are present in
-  both reference dylibs, but their chained-fixup target-class pointers were not
-  resolved. No DLInsta-to-IG456 category binding is claimed: `BLOCKED`.
+A read-only re-parse of the 456 main executable now resolves
+`LC_DYLD_CHAINED_FIXUPS` (`DYLD_CHAINED_PTR_64`) and walks
+`__objc_classlist` → `class_ro` → method lists. The generated table contains
+**187,670** unique class/selector/encoding rows from **52,806** classes and
+**187,672** method entries; 24,425 small method lists are not decoded by this
+encoder. The earlier relative-offset blocker is therefore resolved for standard
+relative method lists. This is static ownership evidence, not runtime dispatch.
+
+| Required selector | 456 owning classes | Representative encoding |
+| --- | ---: | --- |
+| `tableView:numberOfRowsInSection:` | 99 | `q32@0:8@16q24` |
+| `tableView:cellForRowAtIndexPath:` | 99 | `@32@0:8@16@24` |
+| `tableView:didSelectRowAtIndexPath:` | 74 | `v32@0:8@16@24` |
+
+`IGProfileSheetTableViewController` is present in `__objc_classlist`, but its
+own method list contains only four unrelated selectors and none of the three
+table-view selectors. Its superclass pointer is a chained imported bind, so an
+inherited implementation cannot be resolved from this binary alone. Static
+direct-ownership by the target class is `FAILED`; runtime method lookup remains
+`NOT TESTED`.
+
+DLInsta-associated selectors resolved in 456:
+
+| Selector | Owning classes | Encoding / example owner |
+| --- | ---: | --- |
+| `likeAndViewCountsDisabled` | 4 | `B16@0:8` — `IGComposition`; `@16@0:8` — `IGVideoViewCountAndLikeCountCellStyleModel` |
+| `markLastMessageAsSeen` | 1 | `v16@0:8` — `IGDirectThreadViewFeatureManager` |
+| `setShouldBlockScreenshot:viewModel:` | 1 | `v28@0:8B16@20` — `IGStoryViewerContainerView` |
+| `storyPlayerMediaViewDidPlayToEnd:` | 4 | `v24@0:8@16` — `IGStoryPlayerMediaViewDelegateInterposer` and three live/direct viewer classes |
+| `traySectionController:didLongPressCell:` | 1 | `v32@0:8@16@24` — `IGStoryTrayController_objc` |
+| `unsendWithMessageViewModel:threadId:consistentThreadFbid:threadSubtype:audienceType:` | 1 | `v56@0:8@16@24@32Q40@48` — `IGDirectMessageMenuActionHandler` |
+
+No 456 owning class was found for `_shouldSendStatus:typingStatusType:`,
+`canPullToRefresh:threadsFilterSet:sortType:`, `didPressFollowButtonWith:`,
+`dl_onLikeButtonPressedWithOriginalBlock:`,
+`fullscreenSectionController:didMarkItemAsSeen:`, `isUserHaveSeenMessage`,
+`onLikeButtonPressed`, `onLikeButtonPressed:`, `showLikeCountInLikersList`,
+`showViewCountInLikersList`, `updateOutgoingStatusIsActive:threadKey:typingStatusType:`,
+`updateOutgoingStatusIsActive:threadKey:threadMetaData:typingStatusType:`, or
+`voiceRecordViewController:didRecordAudioClipWithURL:waveform:duration:entryPoint:`.
+Selector strings/references alone are therefore not sufficient to infer a hook
+target. `VERIFIED` for the negative static result.
+
+DLInsta category names `SafeGetters`, `DLTTrim`, and `DLTMore` are present in
+both reference dylibs, but their chained-fixup target-class pointers were not
+resolved. No DLInsta-to-IG456 category binding is claimed: `BLOCKED`.
 
 ### 3. Interception implementation identified
 
@@ -115,7 +149,7 @@ the linkage from a preference value to an implementation is therefore `BLOCKED`.
 | Does the 456 executable load `DLInsta.dylib`? | `FAILED` | No DLInsta load command exists in the target executable. The 452/453 reference executables do contain a weak-load dependency; the target does not. |
 | Does DLInsta load successfully inside Instagram 456? | `NOT TESTED` | Requires an authorized, signed, injected app copy. |
 | Does `IGProfileSheetTableViewController` exist at runtime in 456? | `NOT TESTED` | Static class metadata is present; runtime gets must be observed in the authorized host. |
-| Are the three selectors implemented by that runtime class? | `NOT TESTED` | Requires `objc_getClass` / `class_getInstanceMethod` evidence in the running host. |
+| Are the three selectors implemented by that runtime class? | `NOT TESTED` | Static own-method table shows no direct implementation; inherited/external superclass behavior requires `objc_getClass` / `class_getInstanceMethod` evidence in the running host. |
 | Is any method implementation actually replaced? | `NOT TESTED` | Requires explicit owner-authorized hook proof. |
 | Does X Settings present from Instagram UI? | `NOT TESTED` | No host presentation hook exists and no device test is authorized. |
 | Does a preference toggle change a verified hook outcome? | `NOT TESTED` | Requires both a verified hook and an authorized runtime. |
@@ -132,11 +166,12 @@ the linkage from a preference value to an implementation is therefore `BLOCKED`.
 | Target class name | recovered from Objective-C class metadata | `VERIFIED` |
 | Required table-view selector strings | present in `__objc_methname` | `VERIFIED` |
 | Required table-view selector references | present in `__objc_selrefs` | `VERIFIED` |
-| Selector ownership and type encodings on the target class | relative method-list fixups unresolved | `BLOCKED` |
+| Full 456 class → selector → encoding table | 187,670 rows from 52,806 classes; chained fixups resolved | `VERIFIED` |
+| Required selectors directly owned by `IGProfileSheetTableViewController` | no matching entries in its own method list; superclass is an imported bind | `FAILED` |
 | DLInsta dependency in 452/453 reference hosts | weak-load command present | `VERIFIED` |
 | DLInsta dependency in 456 target | load command absent | `FAILED` |
 | DLInsta hook primitive availability | imports listed above | `VERIFIED` |
-| DLInsta hook bound to the 456 target class | no target-class string in DLInsta; static fixup binding unresolved | `BLOCKED` |
+| DLInsta hook bound to the 456 target class | 456 selector ownership resolved, but DLInsta category target-class pointers remain unresolved | `BLOCKED` |
 | Preference key → implementation linkage | APIs present, key mapping not resolved | `BLOCKED` |
 | Safe X Settings presentation from host | no host hook implemented | `NOT TESTED` |
 | Runtime launch, hook, UI, persistence, crash behaviour | no authorized runtime | `NOT TESTED` |

@@ -9,7 +9,8 @@
 
 - `origin/main` is `0ecbe9c`, the reviewed iOS Core foundation ([PR #8](https://github.com/Binz2008-star/Project-X/pull/8)). No merge or deployment has been authorized for the newer draft chain.
 - The current draft review chain is [PR #7](https://github.com/Binz2008-star/Project-X/pull/7) `46816c5` (read-only IPA analyzer), [PR #9](https://github.com/Binz2008-star/Project-X/pull/9) `705bcd9` (fail-closed Build Manager preflight), and [PR #10](https://github.com/Binz2008-star/Project-X/pull/10) `8c1ac3c` (analyzer-to-preflight integration). Independent final-head `APPROVE` verdicts are recorded in the PR evidence comments; all three remain **OPEN DRAFT**.
-- [PR #11](https://github.com/Binz2008-star/Project-X/pull/11) `b7ba8d2` is a separate **OPEN DRAFT** for `feature/xinsta-static-integration`, based on `feature/integration-readiness` so its diff stays limited to the read-only IG456 static evidence and inert Xinsta Core diagnostics/settings work.
+- [PR #11](https://github.com/Binz2008-star/Project-X/pull/11) `5bc5314` is a separate **OPEN DRAFT** for `feature/xinsta-static-integration`, based on `feature/integration-readiness` so its diff stays limited to the read-only IG456 static evidence and inert Xinsta Core diagnostics/settings work.
+- The read-only 456 class→selector→encoding table is complete (52,806 classes, 187,670 unique rows). It is recorded in [IG456_STATIC_EVIDENCE.md](IG456_STATIC_EVIDENCE.md) and is a static prerequisite only, not hook proof.
 - Owner-directed hold: PRs #7/#9/#10 and any merge/readiness transition remain frozen until the single vertical-slice hook result is in. PR #11 is documentation/static-only and is not merge authorization.
 - Runtime proof remains absent: no IPA execution, injection, signing, repackaging, installation, device test, or verified hook has been performed. See [IG456_STATIC_EVIDENCE.md](IG456_STATIC_EVIDENCE.md) and [XINSTA_CORE.md](XINSTA_CORE.md).
 

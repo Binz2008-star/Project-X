@@ -225,10 +225,14 @@ the PR chain and owner-directed hold. It adds no hook, injection, signing,
 repackaging, installation, device execution, or runtime proof.
 
 The exact-456 class→selector→encoding table and selector-reference analysis are
-read-only investigations kept outside the repository. Their results must be
-recorded in the static evidence document before any single vertical-slice hook
-experiment is considered. PRs #7/#9/#10 remain held until that one-hook result
-is in.
+read-only investigations kept outside the repository. The table is now complete:
+52,806 classes, 187,672 method entries and 187,670 unique class/selector/encoding
+rows were recovered after resolving `LC_DYLD_CHAINED_FIXUPS`. The results are
+recorded in [IG456_STATIC_EVIDENCE.md](IG456_STATIC_EVIDENCE.md), including the
+finding that `IGProfileSheetTableViewController` does not directly own the three
+required table-view selectors in its own method list. This static prerequisite is
+satisfied; it is not hook proof. PRs #7/#9/#10 remain held until the owner's
+single vertical-slice hook result is in.
 
 ## Model 1 review closure
 

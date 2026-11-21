@@ -2,7 +2,7 @@
 
 **Updated:** 21 November 2026
 
-**Source inspected:** [feature/xinsta-static-integration](https://github.com/Binz2008-star/Project-X/tree/feature/xinsta-static-integration), commit `b7ba8d2deb43adfc3ffa5185890c5f5218010c67` ([PR #11](https://github.com/Binz2008-star/Project-X/pull/11)). The licensing/Neon details below remain the historical checkpoint from `5b2e48a3bb7912aef42467fcb2b1d4ca5d8df888`.
+**Source inspected:** [feature/xinsta-static-integration](https://github.com/Binz2008-star/Project-X/tree/feature/xinsta-static-integration), commit `5bc531487b035b481cec1d2ed08db8e4569325b8` ([PR #11](https://github.com/Binz2008-star/Project-X/pull/11)). The licensing/Neon details below remain the historical checkpoint from `5b2e48a3bb7912aef42467fcb2b1d4ca5d8df888`.
 
 **Companion:** [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md). Read [API_STATUS.md](API_STATUS.md), [API_SETUP.md](API_SETUP.md), [IG456_STATIC_EVIDENCE.md](IG456_STATIC_EVIDENCE.md), [XINSTA_CORE.md](XINSTA_CORE.md), and [NEON_STAGING.md](NEON_STAGING.md) for detailed contracts/limitations.
 
@@ -13,7 +13,7 @@
 | [#7](https://github.com/Binz2008-star/Project-X/pull/7) | `main` | `46816c5` | Read-only IPA analyzer | OPEN DRAFT; final-head independent `APPROVE` in evidence comment; CI `44844881381` / `44844886566` SUCCESS |
 | [#9](https://github.com/Binz2008-star/Project-X/pull/9) | `main` | `705bcd9` | Fail-closed Build Manager preflight | OPEN DRAFT; final-head independent `APPROVE` in evidence comment; CI `44843139122` / `44843152377` SUCCESS |
 | [#10](https://github.com/Binz2008-star/Project-X/pull/10) | `feature/ipa-build-manager` | `8c1ac3c` | Analyzer-to-preflight integration | OPEN DRAFT; final-head independent `APPROVE` in evidence comment; CI `44845435049` / `44845444698` SUCCESS |
-| [#11](https://github.com/Binz2008-star/Project-X/pull/11) | `feature/integration-readiness` | `b7ba8d2` | Xinsta read-only IG456 static evidence and inert Core diagnostics/settings | OPEN DRAFT; static only; no merge claim |
+| [#11](https://github.com/Binz2008-star/Project-X/pull/11) | `feature/integration-readiness` | `5bc5314` | Xinsta read-only IG456 static evidence and inert Core diagnostics/settings | OPEN DRAFT; static only; no merge claim |
 
 Owner-directed hold: PRs #7/#9/#10 must not be merged, retargeted, or expanded until the single vertical-slice hook result is in. No PR in this chain has been merged. PR #11 does not add a hook, injection, signing, repackaging, installation, device execution, or runtime proof.
 
