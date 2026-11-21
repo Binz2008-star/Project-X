@@ -79,11 +79,11 @@ entirely. Both classic and ZIP64 end-of-central-directory records are parsed.
   names describe metadata presence, not signature validity. The report schema is now `1.1`.
 - **A7-6 / output safety:** `--json` writes to a temporary file in the destination directory.
   The input descriptor identity is captured before analysis and checked again immediately before
-  publication. The target is unlinked only after those checks, then the report is published with
-  a no-overwrite hard link. A symlink cannot redirect the write, and a concurrent rename that puts
-  the input archive at the target makes publication fail closed with
-  `OUTPUT_COLLIDES_WITH_INPUT` or `OUTPUT_WRITE_FAILED`; the archive bytes are never replaced.
-  The output directory must be controlled by the caller.
+  publication. The report is published with a no-overwrite hard link; an existing target,
+  including a symlink, is never removed or replaced. A concurrent rename that puts the input
+  archive at the target makes publication fail closed with `OUTPUT_COLLIDES_WITH_INPUT` or
+  `OUTPUT_WRITE_FAILED`; the archive bytes are never deleted. The output directory must be
+  controlled by the caller.
 - **A7-7 / weak dependencies:** dependency refs retain their Mach-O load-command `kind`.
   Required unresolved `@rpath` references remain `UNRESOLVED_RPATH_DEPENDENCY` (critical);
   weak ones emit `WEAK_UNRESOLVED_RPATH_DEPENDENCY` (warning). CPU subtype `1` is normalised
@@ -98,6 +98,9 @@ entirely. Both classic and ZIP64 end-of-central-directory records are parsed.
 | A7-R3 | Report publication rechecks the captured input identity, uses a no-overwrite hard link, and refuses to replace a target recreated during publication. | Race test that renames the input onto the output immediately before publication; static symlink test retained. |
 | A7-R4 | Provisioning-profile `Name` and `ExpirationDate` are strictly typed. A parseable profile with non-string/date values is refused with the fixed `PLIST_INVALID` reason; `to_dict()` cannot emit non-string fields or raise on `to_json()`. | Parametrised malformed-profile tests plus a valid-date round-trip test. |
 | A7-R5 | The CLI uses a safe argument parser and a fixed `FILE_NOT_FOUND` message; raw arguments, unknown options and private paths are never echoed. | CLI tests for invalid numeric options, unknown options and missing files under a private-looking directory. |
+| A7-R6 | Publication never unlinks the target: an existing report or symlink is refused, so no window exists between a collision check and a destructive unlink. | Existing-target, symlink, no-unlink tracer and publication-race tests. |
+| A7-R7 | All input-path I/O errors, not only `FileNotFoundError`, produce a fixed refusal without echoing the path or a traceback. | Private-directory CLI test. |
+| A7-R8 | Semantically invalid numeric limits (`0`, negative) produce fixed `INVALID_ARGUMENTS` instead of an uncaught `ValueError`. | Parametrised CLI limit tests. |
 
 Downstream consumers must accept schema `1.1`. No private field names, local paths or raw
 parser text are emitted by the new refusal codes.
