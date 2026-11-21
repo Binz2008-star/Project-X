@@ -189,7 +189,7 @@ catalog, or a claim that X Settings was shown in Instagram.
 
 GitHub Actions workflow-dispatch run `44854002545` on head
 `fbfdc5f2ab18db0233b9d7e0eab34181f5d169d1` completed successfully on
-`macos-15-arm64`:
+`macos-15`:
 
 - unsigned iOS dylib compilation with strict warnings: passed;
 - `XinstaCore tests: 82 passed, 0 failed`;
@@ -201,6 +201,19 @@ The local Windows workspace independently verified `301 passed, 30 skipped`
 Python tests, `OK (7 tests)` for the legacy licensing suite, synchronized
 OpenAPI, and a clean `git diff --check`. These results do not prove Instagram
 runtime loading, hooking, presentation inside Instagram, or device behaviour.
+
+### Independent Phase 3 review
+
+A fresh, read-only independent review of head `f1a5dd6` returned
+`APPROVE WITH NON-BLOCKING NOTES`: no blocking findings and no claim of runtime
+hook behaviour, Instagram-host presentation, or device verification. The
+reviewer noted that one runner label and one static-report status label were
+inconsistent with the underlying workflow/status taxonomy; both are corrected
+on this head. It also noted a defensive diagnostic status that is currently
+unreachable through the adapter state machine, and that load-log redaction,
+off-main-thread presentation refusal, and presenter binding mismatch are
+code-inspected rather than directly asserted. This record is review evidence,
+not merge authorization.
 
 ## Model 1 review closure
 

@@ -149,6 +149,6 @@ Phase 3 code therefore keeps compatibility read-only, binds every feature to an
 explicit adapter identifier, blocks presentation when the target or adapter is
 unavailable, and emits only fixed diagnostic codes.
 
-Runtime proof remains `BLOCKED` pending explicit written owner authorization,
-an authorized app copy, signing identity, provisioning profile, registered UDID,
-approved injection method, and a verified hook path.
+Runtime proof remains `NOT TESTED`; it is blocked pending explicit written
+owner authorization, an authorized app copy, signing identity, provisioning
+profile, registered UDID, approved injection method, and a verified hook path.
