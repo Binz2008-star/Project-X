@@ -1,8 +1,15 @@
-"""Dry-run packaging planners.
+"""Deterministic private-pilot packaging helpers.
 
-These helpers describe what a future private-host packaging step would do. They
-never extract, rewrite, sign, repackage, install or launch an application.
+The planner is read-only. The builder performs bounded file work on a disposable
+copy and explicitly stops before code signing or device installation.
 """
+from .builder import PilotBuildError, build_unsigned_pilot_ipa
 from .pilot_plan import PilotPlanError, build_pilot_package_plan, plan_json
 
-__all__ = ["PilotPlanError", "build_pilot_package_plan", "plan_json"]
+__all__ = [
+    "PilotBuildError",
+    "PilotPlanError",
+    "build_pilot_package_plan",
+    "build_unsigned_pilot_ipa",
+    "plan_json",
+]

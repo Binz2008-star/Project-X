@@ -22,10 +22,8 @@ _CHUNK = 1024 * 1024
 
 def sha256_of_file(path: str) -> str:
     """Standalone helper retained for compatibility; the inspector does not use it."""
-    digest = hashlib.sha256()
     with open(path, "rb") as handle:
-        digest.update(_hash_handle(handle))
-    return digest.hexdigest()
+        return _hash_handle(handle)
 
 
 def _hash_handle(handle) -> str:

@@ -1,12 +1,12 @@
 # IPA Build Manager — dry-run preflight gate
 
-Status: **fail-closed preflight/planning increment implemented, locally tested and CI-verified in the Draft PR stack; no build, sign, repackage, install, or device action is included.** PR #9 base was retargeted from `feature/xinsta-core` to `main`; its diff now contains only Build Manager files.
+Status: **fail-closed preflight/planning and bounded unsigned packaging executor implemented and locally tested in the Draft PR stack; no signing, final signed repackage, install, or device action is included.** PR #9 base was retargeted from `feature/xinsta-core` to `main`; its diff now contains only Build Manager files.
 
 ## What this increment does
 
 It answers one narrow question: *given an unsigned owner declaration manifest and a read-only inspection report for a specific IPA, is a future integration plan safe enough to send for independent review?* The declaration is an **advisory assertion only**; it is not cryptographic proof of authorization.
 
-The tool consumes bounded JSON only. It never opens an IPA, never extracts, writes, signs, relocates, or installs a bundle, never reads credentials, and never contacts a device or remote service. A passing result produces a deterministic **dry-run plan** whose `execution_permitted` field is always `false`. A separate, fail-closed authorization gate (below) is required before any future execution, and even a valid permit is dry-run-only because this repository has no executor.
+The preflight tool consumes bounded JSON only. It never opens an IPA, never extracts, writes, signs, relocates, or installs a bundle, never reads credentials, and never contacts a device or remote service. A passing result produces a deterministic **dry-run plan** whose `execution_permitted` field is always `false`. A separate, fail-closed authorization gate (below) is required before any future execution. The separate packaging executor added for the private pilot is bounded and unsigned: it can write a disposable, distinct IPA for private review but cannot sign, install, or contact a device.
 
 ## Files
 
@@ -124,10 +124,13 @@ Each CLI input is limited to `MAX_INPUT_BYTES = 4 * 1024 * 1024`, `MAX_JSON_DEPT
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest -q --basetemp '<approved-temp-dir>' tests/test_build_manager_preflight.py tests/test_build_manager_authorization.py
+.\.venv\Scripts\python.exe -m pytest -q --basetemp '<approved-temp-dir>' tests/test_pilot_package_plan.py tests/test_pilot_package_build.py
 .\.venv\Scripts\python.exe -m scripts.build_manager_preflight --manifest manifest.json --report report.json
+.\.venv\Scripts\python.exe -m scripts.pilot_package_plan --ipa '<pinned-source>.ipa' --dylib '<reviewed-core>.dylib'
+.\.venv\Scripts\python.exe -m scripts.pilot_package_build --ipa '<pinned-source>.ipa' --dylib '<reviewed-core>.dylib' --output '<unsigned-output>.ipa' --rights-reference PRIVATE-REVIEW-REF
 ```
 
-Exit codes: `0` preflight passed, `2` preflight rejected, `1` unreadable/oversized input, invalid JSON shape, or invalid arguments — including unknown flags and missing required flags. Argument errors print only `{"error": "invalid_arguments"}`; file/JSON errors print only a fixed error code. No private path, argument text, or decoder detail is echoed. Windows syntax uses `--basetemp` because the default pytest temp root can be ACL-restricted; CI on Linux needs no override.
+The builder's `--rights-reference` must be a non-secret private review identifier; it is validated but never stored, embedded, logged, or emitted. The output is unsigned and invalidated for signing. Exit codes: `0` preflight passed, `2` preflight rejected, `1` unreadable/oversized input, invalid JSON shape, or invalid arguments — including unknown flags and missing required flags. Argument errors print only `{"error": "invalid_arguments"}`; file/JSON errors print only a fixed error code. No private path, argument text, or decoder detail is echoed. Windows syntax uses `--basetemp` because the default pytest temp root can be ACL-restricted; CI on Linux needs no override.
 
 ## Verification
 
@@ -169,13 +172,26 @@ display name, and rpath status. On code head
 pinned IPA and downloaded dylib reported `execution_permitted=false` with all
 four execution steps blocked.
 
-A fresh Windows preparation check confirmed that the repository still contains no
-signing, repackaging, Sideloadly integration, or installer implementation: the
-`project_x/packaging` module explicitly never signs, writes, or installs an IPA,
-and the only IPA `zipfile` writers are test fixtures. Sideloadly was not found on
-the host. The pipeline therefore cannot produce an independently signed,
-installable `Xinsta.ipa`; it can only produce the reviewed dry-run plan. See
-`docs/IG456_PRIVATE_PILOT.md` for the gated practical plan.
+`project_x/packaging/builder.py`, `project_x/packaging/macho_patch.py` and
+`scripts/pilot_package_build.py` add a bounded **unsigned** executor for the same
+pinned inputs. It requires a non-secret rights reference before changing the
+source, rechecks both pinned hashes, rejects output/input path collisions, copies
+entries into a new archive, rewrites app/extension/entitlement identities, stages
+the reviewed Core dylib, appends one `LC_LOAD_DYLIB` with fail-closed file-offset
+relocation, re-analyzes the output, and deletes an output that fails verification.
+The source file is never opened for writing. The result is explicitly marked
+`signed=false` and `invalidated_requires_resign`; no nested signing, final signed
+package, Sideloadly integration, installer, or device action is included.
+
+`tests/test_pilot_package_build.py` covers the unsigned build output, source
+integrity, rights-reference rejection, path-safe CLI errors, Mach-O header-segment
+mapping, modern linkedit offsets, fileset rejection, and the raw SHA-256 helper.
+On the current local worktree the focused builder/planner suite passed
+`21 passed`; the full suite passed `366 passed, 30 skipped`; legacy licensing
+passed `OK (7 tests)`; OpenAPI synchronization and `git diff --check` passed.
+These are local results only; CI for the new code is pending. The third-party
+rights and signing blockers remain unchanged, so no installable `Xinsta.ipa` has
+been produced. See `docs/IG456_PRIVATE_PILOT.md` and `docs/RIGHTS_REGISTER.md`.
 
 ### Independent load-policy review
 

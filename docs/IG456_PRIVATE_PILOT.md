@@ -1,9 +1,10 @@
 # Instagram 456 private-pilot identity policy
 
-Status: **DEVELOPMENT POLICY + DRY-RUN PLANNER; NOT TESTED ON A DEVICE**. No IPA
-has been signed, injected, repackaged, installed, launched, or modified. No
-iPhone was changed. Core source and the unsigned dylib are CI-verified at the
-recorded head; this document is still a review artifact, not an execution permit.
+Status: **DEVELOPMENT POLICY + DRY-RUN PLANNER + BOUNDED UNSIGNED EXECUTOR; NOT
+TESTED ON A DEVICE**. No real third-party IPA has been signed, injected,
+repackaged, installed, launched, or modified outside synthetic tests. No iPhone
+was changed. Core source and the unsigned dylib are CI-verified at the recorded
+head; this document is still a review artifact, not an execution permit.
 
 The private pilot is a separate, development-only application identity derived
 from the exact owner-provided Instagram `456.0.0` source artifact. Its purpose is
@@ -199,7 +200,7 @@ found:
 | Source IPA hash | `VERIFIED`: `665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131` |
 | Core artifact hash | `VERIFIED`: `bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff` |
 | Dry-run planner | `VERIFIED`: `execution_permitted=false`; all four signing/repackage/install steps blocked |
-| Packaging pipeline output | `BLOCKED`: no signing, repackaging, Sideloadly integration, or installer implementation in the repository |
+| Packaging pipeline output | `PARTIAL`: bounded unsigned executor implemented and locally tested; signed/installable output remains `BLOCKED` pending rights evidence, nested signing, Sideloadly/device inputs |
 | iPhone visibility | `BLOCKED`: iTunes device count `0`; no present Apple USB device; iOS/Developer Mode `NOT TESTED` |
 | Signing inputs | `BLOCKED`: `0` code-signing certificates, `0` provisioning profiles, `0` iOS deployment/signing tools found |
 
@@ -222,11 +223,13 @@ This is a gated plan, not an execution permit:
 3. **Inputs:** keep the pinned source IPA and the exact CI dylib artifact;
    reverify both hashes and rerun the dry-run planner. Stop unless
    `execution_permitted=false` and all execution steps remain blocked.
-4. **Build outside the repository:** on the reviewed host, make a disposable copy
+4. **Build the unsigned copy:** on the reviewed host, make a disposable copy
    of the source IPA. Rewrite the 8 extension identifiers, bundle ID, display
    name, URL schemes, App Group prefix, and entitlements to the pinned pilot
    values. Stage the dylib in `Frameworks`; insert the Core load command only if
-   absent; do not add a duplicate rpath. Never modify the original IPA.
+   absent; do not add a duplicate rpath. Never modify the original IPA. The
+   bounded executor implements this file work for an authorized source and stops
+   before signing.
 5. **Sign:** sign the dylib, nested bundles/extensions, and app with the pilot
    development profile. Sideloadly may perform final signing, but all nested
    bundles must be re-signed and entitlements must match the pilot declaration.
@@ -253,8 +256,8 @@ output path or hash exists, and no host software was installed.
 | Source IPA | `VERIFIED`: pinned hash `665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131`, `com.burbn.instagram`, `456.0.0` (`1114925422`), min iOS 16.3, arm64, encrypted `0`, 8 extensions, 8 URL schemes, 6 frameworks, 9 resource bundles |
 | Core artifact | `VERIFIED`: unsigned arm64 iOS 16.3 dylib hash `bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff`, install name `@rpath/libXinstaCore.dylib`, system-only dependencies |
 | Pilot identity | `VERIFIED`: `com.projectx.xinsta.pilot`, display name `Xinsta`, adapter `com.projectx.xinsta.pilot@456.0.0@1114925422`, pilot URL scheme and extension/App Group prefixes pinned |
-| Build implementation | `BLOCKED`: `project_x/packaging` is explicitly dry-run-only. No extractor, Info.plist rewriter, dylib injector, load-command editor, nested re-signer, IPA writer, Sideloadly integration, or device executor exists. The only IPA zip writers are test fixtures |
-| Test coverage | `VERIFIED`: 7 planner tests cover deterministic dry-run output, source/dylib hash rejection, Core load-command rejection, duplicate rpath rejection, invalid dylibs, and path-safe CLI errors. CI also passes analyzer, Build Manager, authorization, contract, and Core suites |
+| Build implementation | `PARTIAL`: `project_x/packaging/builder.py` and `macho_patch.py` implement bounded unsigned copy/identity rewrite/dylib staging/load-command insertion with source-integrity and fail-closed checks. Nested re-signing, final signed packaging, Sideloadly integration, and device execution remain absent |
+| Test coverage | `VERIFIED`: 21 builder/planner tests cover unsigned output, source integrity, rights-reference rejection, path-safe CLI errors, Mach-O offset relocation, fileset rejection, and the dry-run planner. Local full suite `366 passed, 30 skipped`; legacy licensing `OK (7 tests)`; OpenAPI synchronized |
 | Core runtime behavior | `VERIFIED`: a constructor emits `[XinstaCore] init=...`, evaluates the compatibility gate, builds a feature registry, and can construct X Settings UI objects. No swizzling, method replacement, hooking, or host-class modification is implemented. Device load remains `NOT TESTED` |
 | Rights | `BLOCKED`: `AGENTS.md` forbids unlicensed Instagram IPA modification; `docs/RIGHTS_REGISTER.md` records only a scoped private load-only proof and no original-app modification right. Chat approval for a personal test is not a license from the rights holder |
 | Windows/Sideloadly | `BLOCKED`: Sideloadly absent; `winget` absent; AMD64 host; web iTunes `12.13.10.3` and Apple Mobile Device Service present; no Microsoft Store iTunes/iCloud packages found; no device, cert, profile, or signing tools present |
@@ -271,10 +274,10 @@ output path or hash exists, and no host software was installed.
    installer from `https://sideloadly.io/SideloadlySetup64.exe` (v0.71.0),
    verify its Authenticode signature and hash, and accept any UAC prompt. This
    was **not** done because host-software installation needs specific approval.
-3. **Packaging executor:** an approved external packaging step must create the
-   disposable app copy, rewrite identities/entitlements/extensions, inject the
-   dylib, insert the load command, re-sign all nested components, and write the
-   IPA. The repository must not be represented as already having this executor.
+3. **Signed packaging executor:** the bounded unsigned executor is implemented,
+   but an approved signing step must still re-sign the dylib, every nested
+   bundle/extension and the app, then write the final signed IPA. The unsigned
+   output must not be represented as installable or rights-cleared.
 4. **Device/signing inputs:** connect and trust the owner's iPhone, confirm iOS
    and Developer Mode, and supply Apple signing credentials only inside the
    signing tool, never in the repository, logs, or chat.
@@ -284,9 +287,10 @@ output path or hash exists, and no host software was installed.
 
 ### Next executable action
 
-Obtain the rights evidence and the specific Sideloadly-install approval. Do not
-create a placeholder IPA, do not substitute Sideloadly for the missing packaging
-executor, and do not modify the original `F:\Instagram.ipa`.
+Obtain the rights evidence and the specific Sideloadly-install approval. The
+unsigned executor may be used only for private review of an authorized source;
+do not create a placeholder signed IPA, do not treat the unsigned output as
+installable, and do not modify the original `F:\Instagram.ipa`.
 
 ## Candidate final installation procedure
 
