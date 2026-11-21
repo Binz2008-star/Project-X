@@ -1,8 +1,9 @@
 # Instagram 456 private-pilot identity policy
 
-Status: **DEVELOPMENT POLICY ONLY; NOT TESTED ON A DEVICE**. No IPA has been
-signed, injected, repackaged, installed, launched, or modified. No iPhone was
-changed. This document is a review artifact, not an execution permit.
+Status: **DEVELOPMENT POLICY + DRY-RUN PLANNER; NOT TESTED ON A DEVICE**. No IPA
+has been signed, injected, repackaged, installed, launched, or modified. No
+iPhone was changed. Core source and the unsigned dylib are CI-verified at the
+recorded head; this document is still a review artifact, not an execution permit.
 
 The private pilot is a separate, development-only application identity derived
 from the exact owner-provided Instagram `456.0.0` source artifact. Its purpose is
@@ -41,6 +42,12 @@ The source IPA hash is the exact hash recorded in
 `4fb7ae5c16c91e77104bdc173c173df9d09a8e0a92ce356d558ffefcf9253378`.
 These values are static evidence only; they do not authorize installation.
 
+The read-only analyzer on the pinned source reports **8** URL schemes and **8**
+embedded extensions. Every one of the eight production extension identifiers
+must be rewritten to the pilot prefix. Earlier notes that counted seven
+extensions were imprecise; the current analyzer inventory is the controlling
+evidence for the packaging planner.
+
 ## Core identity policy
 
 `XinstaIdentityPolicy` maps exactly two host identities to exactly two adapter
@@ -59,10 +66,36 @@ resolved binding. Feature registries are per binding, and the diagnostic reports
 vice versa. No hook, swizzle, method replacement, or host class modification is
 implemented or enabled.
 
-Status of the Objective-C policy source after this increment: `NOT TESTED` until
-the macOS build and tests run on the exact reviewed head. The production gate
-remains unchanged for all non-pilot identities: `NOT TESTED` in a real host,
-`VERIFIED` only as source/test intent in this repository.
+Status of the Objective-C policy source at committed head
+`1c6395e42890be0d65c6f6a5099c3b0c6158fd64`: `VERIFIED` by macOS CI run
+`44909181721` — 114 Foundation assertions passed, 8 simulator XCTests passed,
+and the unsigned arm64 iOS 16.3 dylib passed structural verification. The
+production gate remains unchanged for all non-pilot identities: `NOT TESTED` in
+a real host, `VERIFIED` as source/test intent in this repository.
+
+## Dry-run packaging planner
+
+`scripts/pilot_package_plan.py` turns the pinned evidence into a deterministic,
+read-only plan. It verifies the source hash and identity, verifies the dylib is
+the unsigned arm64 iOS 16.3 artifact with install name
+`@rpath/libXinstaCore.dylib` and system-only dependencies, then emits planned
+package changes with all signing, repackaging, analysis-on-output and device
+steps marked `blocked`. It never extracts, edits, signs, writes or installs an
+IPA. Its `execution_permitted` field is always `false`.
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.pilot_package_plan `
+  --ipa F:\Instagram.ipa `
+  --dylib <downloaded-unsigned-libXinstaCore.dylib>
+```
+
+Verified against the pinned source and the downloaded CI artifact:
+`source.sha256` equals the pinned Instagram hash, `source.extension_count = 8`,
+`source.url_scheme_count = 8`, `dylib.sha256` equals
+`bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff`,
+`dylib.load_command_count = 21`, `dylib.dependencies = system_only`, and
+`dylib.signed = false`. The output contains no paths, timestamps, secrets or
+device identifiers.
 
 ## Build Manager policy
 
@@ -100,27 +133,28 @@ step in the dry-run plan.
 
 ## Windows host investigation
 
-The following were observed on the owner’s Windows host: `VERIFIED`.
+An earlier session observed Apple USB/WPD nodes with status `OK` and iTunes,
+3uTools and Python installed. That is historical evidence only. A fresh check on
+the final head found the device is **not currently readable from Windows**:
 
 | Observation | Result |
 | --- | --- |
-| `Apple Mobile Device USB Device` | present, status `OK` |
-| `Apple Mobile Device USB Composite Device` | present, status `OK` |
-| WPD `Apple iPhone` | present, status `OK` |
-| USB problem count | `0` |
-| Windows trust/data-mode access | `VERIFIED` |
-| iTunes, 3uTools, Python | installed |
+| Apple Mobile Device Service | running, automatic start — `VERIFIED` |
+| iTunes COM version | `12.13.10.3` — `VERIFIED` |
+| iTunes COM device count | `0` — `VERIFIED` |
+| Present-only Apple PnP devices | none; Apple nodes are reported as phantom — `VERIFIED` |
+| Windows trust/data-mode access | `NOT TESTED` because no device is currently readable |
+| iOS version | `NOT TESTED` |
+| Pairing validity | `NOT TESTED` |
+| Developer Mode state | `NOT TESTED` |
 
 The following were not observed or were absent: `NOT TESTED` / `FAILED`.
 
 | Item | Status |
 | --- | --- |
-| Apple lockdown pairing detail | `NOT TESTED` |
-| iOS version | `NOT TESTED` |
-| Developer Mode state | `NOT TESTED` |
 | Sideloadly installed or run | `NOT TESTED` |
 | `xcodebuild`, `clang`, `make`, `ruby`, `pod`, Theos | absent on Windows host |
-| `codesign`, `ios-deploy`, `idevice_id` | absent on Windows host |
+| `codesign`, `ios-deploy`, `idevice_id`, `idevicedevmodectl` | absent on Windows host |
 | Signing identity with private key | `FAILED` — none found |
 | Provisioning profiles | `FAILED` — none found |
 | Installable injected/repacked IPA | `NOT TESTED` |
@@ -180,17 +214,18 @@ on a private host with mode `0700` work and evidence directories.
 All of the following must exist in the private evidence bundle:
 
 1. exact clean source head and approved review reference;
-2. original source hash and pinned identity values;
-3. unsigned dylib build/test logs and dylib hash;
-4. pilot output hash distinct from the source hash;
-5. analyzer report and dry-run Build Manager result with no blockers;
-6. load-command and rpath evidence lines;
-7. local signing verification output with no errors;
-8. iOS version and Developer Mode state, recorded without UDID or private logs;
-9. installer output for the pilot bundle only;
-10. a console line containing the pilot process name and `[XinstaCore] init=`;
-11. post-install confirmation that the production app remains installed;
-12. post-rollback confirmation that the pilot is gone and production remains.
+2. original source hash and pinned identity values, including all 8 extensions;
+3. macOS CI build/test logs and unsigned dylib hash;
+4. dry-run packaging planner output for the exact source and dylib;
+5. pilot output hash distinct from the source hash;
+6. analyzer report and dry-run Build Manager result with no blockers;
+7. load-command and rpath evidence lines;
+8. local signing verification output with no errors;
+9. iOS version and Developer Mode state, recorded without UDID or private logs;
+10. installer output for the pilot bundle only;
+11. a console line containing the pilot process name and `[XinstaCore] init=`;
+12. post-install confirmation that the production app remains installed;
+13. post-rollback confirmation that the pilot is gone and production remains.
 
 The marker proves only that the constructor ran. A `ready` code proves that the
 read-only gate accepted the pilot host. Neither proves a hook, X Settings

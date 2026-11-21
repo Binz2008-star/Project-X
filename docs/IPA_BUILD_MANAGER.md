@@ -142,16 +142,24 @@ Alembic checks, and synchronized OpenAPI. The documentation-only follow-up head
 `114b3b3ac524957982f202b5e580199ba9038cc5` passed CI run `44856414354` with
 the same counts. No runtime load evidence is claimed.
 
-### Private-pilot policy increment (local evidence only)
+### Private-pilot policy increment
 
-On the uncommitted working tree of `feature/ig456-private-pilot-identity`, after
-the analyzer schema `1.2` and pilot isolation additions: full local pytest
-`345 passed, 29 skipped`; focused analyzer/preflight/contract suites
+On committed head `1c6395e42890be0d65c6f6a5099c3b0c6158fd64`, GitHub Actions
+run `44909181636` passed the licensing CI job: API `58 passed`, staging guard
+`2 passed`, analyzer `96 passed`, preflight/authorization `193 passed`,
+contract `18 passed`, and licensing `Ran 7 tests`. The companion macOS Core run
+`44909181721` passed 114 Foundation assertions, 8 simulator XCTests and the
+dylib structural checks. Earlier local evidence on the same code:
+full pytest `345 passed, 29 skipped`; focused analyzer/preflight/contract suites
 `290 passed`; legacy licensing `OK (7 tests)`; OpenAPI synchronization passed;
-`git diff --check` clean apart from Git's LF-to-CRLF warnings on checked-out
-scripts. No commit head, CI run, macOS Core build, signing operation, install,
-or runtime evidence exists for this increment: each is `NOT TESTED` until
-recorded separately. See `docs/IG456_PRIVATE_PILOT.md`.
+`git diff --check` clean. Signing, install and runtime evidence remain
+`NOT TESTED`. See `docs/IG456_PRIVATE_PILOT.md`.
+
+`project_x/packaging/pilot_plan.py` and `scripts/pilot_package_plan.py` add a
+fail-closed dry-run planner for the pinned source plus unsigned Core dylib. It
+emits read-only packaging steps and marks signing, repackaging, output analysis
+and device installation as blocked. The new
+`tests/test_pilot_package_plan.py` suite passed locally with `6 passed`.
 
 ### Independent load-policy review
 
