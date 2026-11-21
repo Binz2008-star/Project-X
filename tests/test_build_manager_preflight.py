@@ -8,11 +8,29 @@ from __future__ import annotations
 
 import copy
 import json
+import struct
 
 import pytest
 
-from project_x.buildmanager import evaluate
-from scripts.build_manager_preflight import main
+from project_x.buildmanager import (
+    ACCEPTED_REPORT_SCHEMA_VERSIONS,
+    EXPECTED_SEVERITIES,
+    REPORT_INCONSISTENT_CODE,
+    UNSAFE_IDENTITY_CODE,
+    evaluate,
+)
+from project_x.buildmanager.preflight import KNOWN_ANALYSIS_CODES
+from scripts.build_manager_preflight import (
+    MAX_INPUT_BYTES,
+    MAX_JSON_DEPTH,
+    MAX_JSON_NODES,
+    main,
+)
+
+MH_MAGIC_64 = 0xFEEDFACF
+CPU_TYPE_ARM64 = 0x0100000C
+CPU_TYPE_X86_64 = 0x01000007
+MH_EXECUTE = 2
 
 SHA = "a" * 64
 BUNDLE = "demo.owned"
@@ -110,6 +128,49 @@ def inspection_report() -> dict:
     }
 
 
+def macho_header_bytes(cpu_type: int, cpu_subtype: int, file_type: int = MH_EXECUTE) -> bytes:
+    """A minimal, real 64-bit Mach-O header; no IPA is opened or modified."""
+    return struct.pack(
+        "<8I",
+        MH_MAGIC_64,
+        cpu_type,
+        cpu_subtype,
+        file_type,
+        0,
+        0,
+        0,
+        0,
+    )
+
+
+def slice_from_header(blob: bytes, *, arch: str | None = None) -> dict:
+    """Turn real Mach-O header bytes into a versioned report slice record."""
+    magic, cpu_type, cpu_subtype, file_type, *_rest = struct.unpack("<8I", blob)
+    assert magic == MH_MAGIC_64
+    subtype_names = {0: "arm64", 1: "arm64", 2: "arm64e"}
+    if arch is None:
+        arch = subtype_names.get(cpu_subtype)
+        if arch is None:
+            arch = "arm64" if cpu_type == CPU_TYPE_ARM64 else "x86_64"
+    record = slice_record()
+    record.update(
+        arch=arch,
+        cpu_type=cpu_type,
+        cpu_subtype=cpu_subtype,
+        is_64_bit=True,
+        file_type="MH_EXECUTE" if file_type == MH_EXECUTE else "MH_DYLIB",
+    )
+    return record
+
+
+def report_with_slices(*records: dict) -> dict:
+    report = inspection_report()
+    report["macho"]["slices"] = list(records)
+    report["macho"]["slice_count"] = len(records)
+    report["macho"]["architectures"] = sorted({record["arch"] for record in records})
+    return report
+
+
 def codes(result) -> set[str]:
     return {finding.code for finding in result.findings}
 
@@ -121,11 +182,19 @@ def test_authorized_owned_package_produces_dry_run_plan() -> None:
     assert result.plan["mode"] == "dry_run"
     assert result.plan["execution_permitted"] is False
     assert result.plan["status"] == "READY_FOR_INDEPENDENT_REVIEW"
+    assert result.plan["authorization"]["verification"] == "advisory_declaration_only"
+    assert result.plan["authorization"]["cryptographically_verified"] is False
     assert result.plan["xinsta_core"]["install_name"] == "@rpath/libXinstaCore.dylib"
     assert result.plan["xinsta_core"]["hook"] is False
     assert result.plan["xinsta_core"]["swizzle"] is False
     blocked = {
         step["id"] for step in result.plan["steps"] if step["status"] == "blocked"
+    }
+    assert "check_owner_declaration" in {
+        step["id"] for step in result.plan["steps"] if step["status"] == "passed"
+    }
+    assert "verify_owner_authorization" not in {
+        step["id"] for step in result.plan["steps"]
     }
     assert {
         "codesign_bundle_and_frameworks",
@@ -427,3 +496,274 @@ def test_report_hash_uses_the_same_strict_format(value) -> None:
     report["artifact"]["sha256"] = value
     result = evaluate(authorization_manifest(), report)
     assert "REPORT_INVALID" in codes(result)
+
+
+# --- B9-1: advisory declaration is not verified authorization ---------------
+
+
+def test_plan_never_claims_verified_authorization() -> None:
+    result = evaluate(authorization_manifest(), inspection_report())
+    assert result.plan is not None
+    assert result.plan["authorization"]["verification"] == "advisory_declaration_only"
+    assert result.plan["authorization"]["cryptographically_verified"] is False
+    output = json.dumps(result.to_dict()).lower()
+    assert '"cryptographically_verified": true' not in output
+    assert "verified authorization" not in output
+
+
+# --- B9-4: bounded, output-safe identity strings ----------------------------
+
+
+UNSAFE_VALUES = (
+    "../secret",
+    "a\\b",
+    "demo.owned\x00x",
+    "demo.owned\nSECRET",
+    "demo.owned\u202e",
+    "demo.owned\u200b",
+    "A" * 257,
+    "password=hunter2",
+)
+
+
+@pytest.mark.parametrize(
+    ("side", "field"),
+    [
+        ("manifest", "authorization_id"),
+        ("manifest", "bundle_id"),
+        ("manifest", "expected_sha256"),
+        ("report", "bundle_id"),
+        ("report", "name"),
+        ("report", "artifact_sha256"),
+    ],
+)
+@pytest.mark.parametrize("bad", UNSAFE_VALUES)
+def test_unsafe_identity_strings_are_rejected_without_echo(side, field, bad) -> None:
+    manifest = authorization_manifest()
+    report = inspection_report()
+    if side == "manifest":
+        if field == "bundle_id":
+            manifest["expected_identity"]["bundle_id"] = bad
+        else:
+            manifest[field] = bad
+    elif field == "artifact_sha256":
+        report["artifact"]["sha256"] = bad
+    else:
+        report["identity"][field] = bad
+
+    result = evaluate(manifest, report)
+    assert UNSAFE_IDENTITY_CODE in codes(result)
+    assert result.plan is None
+    assert bad not in json.dumps(result.to_dict())
+
+
+def test_third_party_bundle_with_unsafe_text_is_still_rejected() -> None:
+    manifest = authorization_manifest()
+    manifest["expected_identity"]["bundle_id"] = "com.burbn.instagram\u202e"
+    result = evaluate(manifest, inspection_report())
+    assert UNSAFE_IDENTITY_CODE in codes(result)
+    assert "com.burbn.instagram" not in json.dumps(result.to_dict())
+
+
+def test_report_context_and_secret_severity_are_never_echoed() -> None:
+    report = inspection_report()
+    report["findings"] = [
+        {
+            "code": "PATH_TRAVERSAL",
+            "severity": "critical",
+            "detail": "SUPER-SECRET-DETAIL",
+            "context": {"password": "SECRET-VALUE"},
+        }
+    ]
+    result = evaluate(authorization_manifest(), report)
+    assert "CRITICAL_ANALYSIS_FINDING" in codes(result)
+    output = json.dumps(result.to_dict())
+    assert "SUPER-SECRET-DETAIL" not in output
+    assert "SECRET-VALUE" not in output
+
+
+# --- B9-5: architecture verification from real Mach-O header bytes ----------
+
+
+@pytest.mark.parametrize(
+    ("subtype", "expected_arch"),
+    [(0, "arm64"), (1, "arm64"), (2, "arm64e")],
+)
+def test_real_macho_arm64_subtypes_are_accepted(subtype, expected_arch) -> None:
+    record = slice_from_header(macho_header_bytes(CPU_TYPE_ARM64, subtype))
+    assert record["arch"] == expected_arch
+    result = evaluate(authorization_manifest(), report_with_slices(record))
+    assert result.preflight_passed is True
+
+
+def test_legacy_arm64v8_alias_is_normalised() -> None:
+    record = slice_from_header(macho_header_bytes(CPU_TYPE_ARM64, 1))
+    record["arch"] = "arm64v8"
+    result = evaluate(authorization_manifest(), report_with_slices(record))
+    assert result.preflight_passed is True
+
+
+@pytest.mark.parametrize("arch", ["x86_64", "armv7", "mystery", 123, None])
+def test_unsupported_architecture_strings_are_rejected(arch) -> None:
+    record = slice_from_header(macho_header_bytes(CPU_TYPE_X86_64, 3))
+    record["arch"] = arch
+    result = evaluate(authorization_manifest(), report_with_slices(record))
+    assert "MAIN_EXECUTABLE_ARCHITECTURE" in codes(result)
+    assert result.preflight_passed is False
+
+
+def test_real_x86_64_macho_header_is_rejected() -> None:
+    record = slice_from_header(macho_header_bytes(CPU_TYPE_X86_64, 3))
+    result = evaluate(authorization_manifest(), report_with_slices(record))
+    assert "MAIN_EXECUTABLE_ARCHITECTURE" in codes(result)
+
+
+def test_mixed_arm64_and_unsupported_slices_are_rejected() -> None:
+    arm = slice_from_header(macho_header_bytes(CPU_TYPE_ARM64, 0))
+    foreign = slice_from_header(macho_header_bytes(CPU_TYPE_X86_64, 3))
+    result = evaluate(authorization_manifest(), report_with_slices(arm, foreign))
+    assert "MAIN_EXECUTABLE_ARCHITECTURE" in codes(result)
+    assert result.preflight_passed is False
+
+
+# --- B9-6: recomputed finding severity --------------------------------------
+
+
+def test_severity_map_covers_every_known_code() -> None:
+    assert KNOWN_ANALYSIS_CODES == frozenset(EXPECTED_SEVERITIES)
+    assert EXPECTED_SEVERITIES["WEAK_UNRESOLVED_RPATH_DEPENDENCY"] == "warning"
+    assert EXPECTED_SEVERITIES["PROVISIONING_PROFILE_UNREADABLE"] == "warning"
+    assert EXPECTED_SEVERITIES["ARCHIVE_CHANGED_DURING_ANALYSIS"] == "critical"
+    assert EXPECTED_SEVERITIES["AMBIGUOUS_APPLICATION_ROOT"] == "critical"
+    assert EXPECTED_SEVERITIES["INVALID_INFO_PLIST_VALUE"] == "critical"
+
+
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("WEAK_UNRESOLVED_RPATH_DEPENDENCY", "warning"),
+        ("PROVISIONING_PROFILE_UNREADABLE", "warning"),
+        ("ARCHIVE_CHANGED_DURING_ANALYSIS", "critical"),
+        ("AMBIGUOUS_APPLICATION_ROOT", "critical"),
+        ("INVALID_INFO_PLIST_VALUE", "critical"),
+        ("PATH_TRAVERSAL", "critical"),
+        ("DUPLICATE_ENTRY_NAME", "warning"),
+        ("NO_EMBEDDED_EXTENSIONS", "info"),
+    ],
+)
+def test_report_severity_is_recomputed_not_trusted(code, expected) -> None:
+    wrong = "warning" if expected == "critical" else "critical"
+    report = inspection_report()
+    report["findings"] = [
+        {
+            "code": code,
+            "severity": wrong,
+            "detail": "SECRET-DETAIL",
+            "context": {"token": "SECRET-CONTEXT"},
+        }
+    ]
+    result = evaluate(authorization_manifest(), report)
+    assert REPORT_INCONSISTENT_CODE in codes(result)
+    assert result.plan is None
+    output = json.dumps(result.to_dict())
+    assert "SECRET-DETAIL" not in output
+    assert "SECRET-CONTEXT" not in output
+
+
+def test_expected_warning_code_becomes_a_review_item() -> None:
+    report = inspection_report()
+    report["findings"] = [
+        {
+            "code": "WEAK_UNRESOLVED_RPATH_DEPENDENCY",
+            "severity": "warning",
+            "detail": "x",
+        }
+    ]
+    result = evaluate(authorization_manifest(), report)
+    assert result.preflight_passed is True
+    assert result.plan["review_findings"] == ["WEAK_UNRESOLVED_RPATH_DEPENDENCY"]
+
+
+def test_expected_critical_code_blocks_the_plan() -> None:
+    report = inspection_report()
+    report["findings"] = [
+        {
+            "code": "ARCHIVE_CHANGED_DURING_ANALYSIS",
+            "severity": "critical",
+            "detail": "x",
+        }
+    ]
+    result = evaluate(authorization_manifest(), report)
+    assert "CRITICAL_ANALYSIS_FINDING" in codes(result)
+    assert result.plan is None
+
+
+# --- Report schema compatibility (1.0 and 1.1) ------------------------------
+
+
+@pytest.mark.parametrize("version", sorted(ACCEPTED_REPORT_SCHEMA_VERSIONS))
+def test_supported_report_schema_versions_are_accepted(version) -> None:
+    report = inspection_report()
+    report["schema_version"] = version
+    assert evaluate(authorization_manifest(), report).preflight_passed is True
+
+
+def test_unsupported_report_schema_is_rejected_without_echoing_it() -> None:
+    secret_schema = "1.9-C:\\Users\\owner\\SECRET"
+    report = inspection_report()
+    report["schema_version"] = secret_schema
+    result = evaluate(authorization_manifest(), report)
+    assert "REPORT_INVALID" in codes(result)
+    assert secret_schema not in json.dumps(result.to_dict())
+
+
+# --- B9-7: bounded JSON input in the CLI ------------------------------------
+
+
+def _write_inputs(tmp_path, manifest_text: str, report: dict | None = None) -> list[str]:
+    manifest_path = tmp_path / "manifest.json"
+    report_path = tmp_path / "report.json"
+    manifest_path.write_text(manifest_text, encoding="utf-8")
+    report_path.write_text(
+        json.dumps(report if report is not None else inspection_report()), encoding="utf-8"
+    )
+    return ["--manifest", str(manifest_path), "--report", str(report_path)]
+
+
+def test_cli_rejects_oversized_input(tmp_path, capsys) -> None:
+    args = _write_inputs(tmp_path, "a" * (MAX_INPUT_BYTES + 1))
+    assert main(args) == 1
+    assert json.loads(capsys.readouterr().out) == {"error": "input_too_large"}
+
+
+def test_cli_rejects_excessive_json_depth(tmp_path, capsys) -> None:
+    depth = MAX_JSON_DEPTH + 1
+    payload = "[" * depth + "0" + "]" * depth
+    args = _write_inputs(tmp_path, payload)
+    assert main(args) == 1
+    assert json.loads(capsys.readouterr().out) == {"error": "json_too_deep"}
+
+
+def test_cli_rejects_excessive_json_nodes(tmp_path, capsys) -> None:
+    payload = "[" + ",".join(["0"] * (MAX_JSON_NODES + 1)) + "]"
+    assert len(payload) < MAX_INPUT_BYTES
+    args = _write_inputs(tmp_path, payload)
+    assert main(args) == 1
+    assert json.loads(capsys.readouterr().out) == {"error": "json_too_many_nodes"}
+
+
+def test_cli_recursion_safe_rejection(tmp_path, capsys) -> None:
+    payload = "[" * 5000 + "0" + "]" * 5000
+    args = _write_inputs(tmp_path, payload)
+    assert main(args) == 1
+    assert json.loads(capsys.readouterr().out) == {"error": "json_too_deep"}
+
+
+def test_cli_accepts_valid_report_schema_1_1(tmp_path, capsys) -> None:
+    report = inspection_report()
+    report["schema_version"] = "1.1"
+    args = _write_inputs(tmp_path, json.dumps(authorization_manifest()), report)
+    assert main(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["preflight_passed"] is True
+    assert payload["plan"]["execution_permitted"] is False
