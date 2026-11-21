@@ -113,7 +113,7 @@ Exit codes: `0` preflight passed, `2` preflight rejected, `1` unreadable/oversiz
 
 ## Verification
 
-B9 correction set (this branch): `142 passed` for `tests/test_build_manager_preflight.py` together with `tests/test_build_manager_authorization.py` using the repository virtualenv on 2026-11-21, with `git diff --check` clean. No CI run is claimed for this branch; it has not been pushed.
+B9 correction set: `142 passed` for `tests/test_build_manager_preflight.py` together with `tests/test_build_manager_authorization.py` using the repository virtualenv on 2026-11-21; API and staging guard `31 passed, 29 skipped`; `git diff --check` clean. CI on the branch head passed push run `44841872361` and PR run `44841879766`; the exact final head is recorded in the PR body. A later independent review of that B9 head required additional malformed-input and documentation corrections, which are tracked in the PR body.
 
 Earlier local/CI evidence below applies to prior commits only and does not cover the B9 changes:
 
@@ -137,6 +137,20 @@ Independent re-review at code head `d9db3445c6ec5029456849e7ba0501ffcf2f7613` re
 
 No merge or deployment is implied by this approval. PR #9 remains DRAFT pending explicit owner authorization.
 
+## B9 re-review corrections
+
+The fresh independent review of the B9 head returned `REQUEST CHANGES`. Each finding is closed in code and regression tests:
+
+| ID | Status | Fix |
+| --- | --- | --- |
+| B9-R1 | FIXED | `schema_version` is type-checked before allowlist membership; unhashable values fail closed as `REPORT_INVALID` instead of raising `TypeError`. |
+| B9-R2 | FIXED | `report.macho.slices` must be a list of JSON objects before slice inspection; non-list values fail closed as `REPORT_INVALID`. |
+| B9-R3 | FIXED | Bounded JSON loading maps `ValueError` from oversized integer literals and malformed JSON to the fixed `input_unreadable` error. |
+| B9-R4 | FIXED | Verifier-raised codes are accepted only from the fixed allowlist; path-like or arbitrary codes reduce to `AUTHORIZATION_VERIFIER_FAILED`. |
+| B9-R5 | FIXED | Verifier-supplied method, signer and provenance values are string-checked before allowlist membership. |
+| B9-R6 | FIXED | Verification documentation no longer claims the branch was unpushed and cites the actual green CI runs. |
+| B9-R7 | FIXED | Documentation states that both report schemas `1.0` and `1.1` are accepted. |
+
 ## Security and compatibility considerations
 
 - Trust boundary: the tool trusts the *structure* of the analyzer report but verifies that the analyzer did not claim signature verification or a malware verdict. A forged report can still misstate facts; the SHA-256 binding to an owner declaration limits casual substitution but is not a cryptographic signature. The unsigned declaration is advisory and is not proof of authorization; `authorization.py` is the separate, fail-closed gate and has no executor.
@@ -147,7 +161,7 @@ No merge or deployment is implied by this approval. PR #9 remains DRAFT pending 
 ## Outstanding risks and next milestone
 
 1. Independent review of the earlier increment is complete: first pass `REQUEST CHANGES`, re-review **APPROVE** with no remaining findings. This B9 increment is not yet independently reviewed. Owner approval is still required for any merge or later integration stage; the unsigned declaration is not that approval.
-2. The analyzer that emits the report lives in the separate Draft PR #7 and is not imported here; integration is by the pinned `schema_version = "1.0"` contract and synthetic payloads only. An end-to-end test with real analyzer output is pending until the branches converge.
+2. The analyzer that emits the report lives in the separate Draft PR #7 and is not imported here. Preflight accepts report schemas `1.0` and `1.1` and uses synthetic payloads only. An end-to-end test with real analyzer output is pending until the branches converge.
 3. An owner-owned, buildable iOS test application must exist before any real integration rehearsal. The fictional `demo.owned` identity is only a contract fixture.
 4. Signing identity, provisioning profile, registered UDID, and written device-authorization scope remain unavailable — all plan steps that need them stay `blocked`.
 5. No approved injection/implantation method or verified hook path exists; X Settings remains a standalone simulator-tested controller.

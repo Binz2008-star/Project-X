@@ -127,6 +127,36 @@ def test_verifier_exception_is_reduced_to_a_fixed_code() -> None:
     assert "private" not in code
 
 
+def test_verifier_raised_path_is_reduced_to_a_fixed_code() -> None:
+    secret = "C:\\Users\\owner\\private\\signing.key"
+
+    def leaking(_manifest: dict) -> VerificationResult:
+        raise AuthorizationVerificationError(secret)
+
+    with pytest.raises(AuthorizationVerificationError) as excinfo:
+        require_execution_permit(MANIFEST, leaking)
+
+    assert excinfo.value.code == "AUTHORIZATION_VERIFIER_FAILED"
+    assert secret not in excinfo.value.code
+    assert secret not in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        pytest.param("method", "VERIFICATION_METHOD_UNKNOWN", id="method"),
+        pytest.param("signer", "SIGNER_NOT_ALLOWED", id="signer"),
+        pytest.param("provenance", "PROVENANCE_NOT_ALLOWED", id="provenance"),
+    ],
+)
+@pytest.mark.parametrize("value", [[], {}], ids=["list", "object"])
+def test_unhashable_verifier_identity_fields_are_rejected(field: str, value, expected: str) -> None:
+    code = rejection_code(
+        lambda: require_execution_permit(MANIFEST, verifier(valid_result(**{field: value})))
+    )
+    assert code == expected
+
+
 def test_invalid_manifest_is_rejected_even_with_a_verifier() -> None:
     manifest = dict(MANIFEST)
     manifest["owner_authorized"] = False
