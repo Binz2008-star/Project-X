@@ -863,6 +863,7 @@ def test_malformed_profile_summary_values_are_refused_without_breaking_json(
 
 def test_cli_refusals_do_not_echo_private_paths(tmp_path: Path, capsys):
     private = tmp_path / "private-family-photos"
+    private.mkdir()
     missing = private / "missing.ipa"
 
     capsys.readouterr()
@@ -870,11 +871,23 @@ def test_cli_refusals_do_not_echo_private_paths(tmp_path: Path, capsys):
     captured = capsys.readouterr()
     assert "FILE_NOT_FOUND" in captured.err
     assert "private-family-photos" not in captured.out + captured.err
+    assert "Traceback" not in captured.out + captured.err
+
+    capsys.readouterr()
+    assert cli_main([str(private)]) == 2
+    captured = capsys.readouterr()
+    assert "FILE_NOT_FOUND" in captured.err
+    assert "private-family-photos" not in captured.out + captured.err
+    assert "Traceback" not in captured.out + captured.err
 
     invalid_invocations = [
         [str(missing), "--max-entries", str(private / "not-an-int")],
         [str(missing), "--max-total-bytes", str(private / "not-an-int")],
         [str(missing), "--private-family-photos", str(private / "value")],
+        [str(missing), "--max-entries", "0"],
+        [str(missing), "--max-entries", "-1"],
+        [str(missing), "--max-total-bytes", "0"],
+        [str(missing), "--max-total-bytes", "-1"],
     ]
     for arguments in invalid_invocations:
         capsys.readouterr()
@@ -882,6 +895,7 @@ def test_cli_refusals_do_not_echo_private_paths(tmp_path: Path, capsys):
         captured = capsys.readouterr()
         assert "INVALID_ARGUMENTS" in captured.err
         assert "private-family-photos" not in captured.out + captured.err
+        assert "Traceback" not in captured.out + captured.err
 
 
 def test_weak_unresolved_rpath_dependency_is_a_warning_with_kind(tmp_path: Path):
@@ -936,11 +950,23 @@ def test_cli_does_not_follow_output_symlink(tmp_path: Path, capsys):
     except (OSError, NotImplementedError):
         pytest.skip("symlinks are unavailable on this filesystem")
 
-    assert cli_main([str(path), "--json", str(output)]) == 0
-    capsys.readouterr()
+    assert cli_main([str(path), "--json", str(output)]) == 2
+    captured = capsys.readouterr()
+    assert "OUTPUT_WRITE_FAILED" in captured.err
     assert sentinel.read_text(encoding="utf-8") == "DO-NOT-OVERWRITE"
-    assert output.is_file() and not output.is_symlink()
-    assert "schema_version" in output.read_text(encoding="utf-8")
+    assert output.is_symlink()
+    assert not list(tmp_path.glob(".inspect-ipa-*"))
+
+
+def test_cli_does_not_overwrite_an_existing_report(tmp_path: Path, capsys):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    output = tmp_path / "report.json"
+    output.write_text("EXISTING-REPORT", encoding="utf-8")
+
+    assert cli_main([str(path), "--json", str(output)]) == 2
+    captured = capsys.readouterr()
+    assert "OUTPUT_WRITE_FAILED" in captured.err
+    assert output.read_text(encoding="utf-8") == "EXISTING-REPORT"
     assert not list(tmp_path.glob(".inspect-ipa-*"))
 
 
@@ -966,3 +992,21 @@ def test_cli_refuses_input_renamed_onto_output_during_publication(
     assert output.read_bytes() == before
     assert not path.exists()
     assert not list(tmp_path.glob(".inspect-ipa-*"))
+
+
+def test_cli_never_unlinks_the_output_target(tmp_path: Path, monkeypatch, capsys):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    output = tmp_path / "report.json"
+    real_unlink = cli_module.Path.unlink
+    unlinked: list[str] = []
+
+    def tracking_unlink(self, *args, **kwargs):
+        unlinked.append(str(self))
+        return real_unlink(self, *args, **kwargs)
+
+    monkeypatch.setattr(cli_module.Path, "unlink", tracking_unlink)
+
+    assert cli_main([str(path), "--json", str(output)]) == 0
+    capsys.readouterr()
+    assert output.is_file()
+    assert not any(Path(item) == output for item in unlinked)

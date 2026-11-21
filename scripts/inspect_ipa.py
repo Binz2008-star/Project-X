@@ -88,11 +88,11 @@ def _write_report(
 ) -> None:
     """Publish a report without following symlinks or overwriting the archive.
 
-    A temporary file is created in the destination directory. The target is
-    removed only after two collision checks, then the temporary file is
-    published with a no-overwrite hard link. If a concurrent rename places the
-    input archive at the target after the final check, the link fails and the
-    archive is left untouched instead of being replaced by report bytes.
+    A temporary file is created in the destination directory and published with
+    a no-overwrite hard link. The target is never removed: an existing target,
+    including a symlink, is refused. If a concurrent rename places the input
+    archive at the target after the final check, the link fails and the archive
+    is left untouched instead of being replaced by report bytes.
     """
     if _output_collides(input_path, output_path, input_identity):
         raise OutputCollisionError
@@ -104,11 +104,6 @@ def _write_report(
             handle.write(payload + "\n")
         if _output_collides(input_path, output_path, input_identity):
             raise OutputCollisionError
-        try:
-            if target.exists() or target.is_symlink():
-                target.unlink()
-        except OSError as exc:
-            raise OutputPublishError from exc
         try:
             os.link(temporary, target)
         except FileExistsError as exc:
@@ -179,6 +174,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    try:
+        limits = _limits_from_args(args)
+    except ValueError:
+        print(
+            "REFUSED [INVALID_ARGUMENTS] command arguments could not be parsed",
+            file=sys.stderr,
+        )
+        return 2
+
     input_identity = _path_identity(args.ipa)
     if args.json_out and _output_collides(args.ipa, args.json_out, input_identity):
         print(
@@ -190,7 +194,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = inspect_ipa(
             args.ipa,
-            limits=_limits_from_args(args),
+            limits=limits,
             compute_sha256=not args.no_hash,
         )
     except ArchiveSafetyError as exc:
@@ -205,7 +209,9 @@ def main(argv: list[str] | None = None) -> int:
     except BundleError as exc:
         print(f"REFUSED [NOT_AN_APPLICATION_IPA] {exc}", file=sys.stderr)
         return 2
-    except FileNotFoundError:
+    except OSError:
+        # Covers missing files, directories, permission failures and other
+        # path-related I/O errors without echoing the caller-supplied path.
         print("REFUSED [FILE_NOT_FOUND] input archive could not be read", file=sys.stderr)
         return 2
 
