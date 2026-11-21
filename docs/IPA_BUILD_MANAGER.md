@@ -156,10 +156,18 @@ full pytest `345 passed, 29 skipped`; focused analyzer/preflight/contract suites
 `NOT TESTED`. See `docs/IG456_PRIVATE_PILOT.md`.
 
 `project_x/packaging/pilot_plan.py` and `scripts/pilot_package_plan.py` add a
-fail-closed dry-run planner for the pinned source plus unsigned Core dylib. It
-emits read-only packaging steps and marks signing, repackaging, output analysis
-and device installation as blocked. The new
-`tests/test_pilot_package_plan.py` suite passed locally with `6 passed`.
+fail-closed dry-run planner for the pinned source plus reviewed unsigned Core
+dylib. It verifies the exact dylib SHA-256
+`bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff`, emits
+read-only packaging steps, reports the source rpath as `already_present`, pins
+the display name to `Xinsta`, and marks signing, repackaging, output analysis and
+device installation as blocked. `tests/test_pilot_package_plan.py` covers wrong
+source/dylib hashes, duplicate rpaths, all accepted Core load-command kinds,
+display name, and rpath status. On code head
+`3c38ca96116acf4e689a9519e554ab4b8ff899a0`, CI run `44912738704` passed
+`10` planner tests and `194` Build Manager tests; the planner run against the
+pinned IPA and downloaded dylib reported `execution_permitted=false` with all
+four execution steps blocked.
 
 ### Independent load-policy review
 

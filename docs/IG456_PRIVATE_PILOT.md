@@ -268,3 +268,48 @@ Production-gate relaxation, hooks, swizzles, X Settings presentation, preference
 to implementation linkage, account login, feature behavior, storefront, paywall,
 redistribution, merge to `main`, deployment, and any change to the installed
 Instagram app remain `BLOCKED` or `NOT TESTED`.
+
+## Final verification closure — 21 November 2026
+
+This closure records the exact code head and evidence used for the final
+readiness decision. It is documentation only; it does not authorize execution.
+
+| Item | Evidence |
+| --- | --- |
+| Branch | `feature/ig456-private-pilot-identity` |
+| Verified code HEAD | `3c38ca96116acf4e689a9519e554ab4b8ff899a0` |
+| Repository state | `VERIFIED`: clean tree; `0/0` ahead/behind upstream; `git diff --check` clean; no merge into `main` |
+| Changes since `a4f09d7` | `1108a38` pinned display name `Xinsta` and rpath evidence; `3c38ca9` pinned the reviewed dylib hash, rejected all Core load-command kinds, and rejected duplicate rpaths |
+| Licensing/API CI | `VERIFIED`: run `44912738704` success at code HEAD: API `58 passed`; Neon guard `2 passed`; analyzer `96 passed`; Build Manager `194 passed`; contract `18 passed`; planner `10 passed`; licensing `Ran 7 tests`; migrations and OpenAPI checks passed |
+| Xinsta Core CI | `VERIFIED`: run `44912738700` success at code HEAD: Foundation `114 passed, 0 failed`; simulator `Executed 8 tests, with 0 failures`; unsigned arm64 iOS 16.3 dylib structural validation passed |
+| Dylib artifact | `VERIFIED`: artifact `14710343439`, `libXinstaCore-unsigned-arm64-ios16.3`; downloaded bytes SHA-256 `bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff`; one arm64 `MH_DYLIB`, min OS 16.3, SDK 18.5, 21 load commands, no signature, install name `@rpath/libXinstaCore.dylib`, system-only dependencies |
+| Source IPA | `VERIFIED`: `F:\Instagram.ipa` SHA-256 `665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131`; analyzer confirms `com.burbn.instagram`, `456.0.0` (`1114925422`), min iOS 16.3, arm64, `cryptid=0`, 8 URL schemes, 8 extensions |
+| Dry-run planner | `VERIFIED` against the exact source and downloaded dylib: `mode=dry_run`, `execution_permitted=false`, `status=READY_FOR_PRIVATE_HOST_REVIEW`, rpath step `already_present`, no Core load command, pilot bundle `com.projectx.xinsta.pilot`, display name `Xinsta`, pilot adapter `com.projectx.xinsta.pilot@456.0.0@1114925422`; all four signing/repackage/install steps blocked |
+| Neon STAGING live API | `BLOCKED`: `NEON_STAGING_DATABASE_URL` absent; guarded scripts exit 1 without DB access; no direct authenticated connection string was supplied or taken from unrelated local configuration. Skipped PostgreSQL tests are not a live pass |
+| Neon read-only check | `VERIFIED`: authorized read-only connector sees project `late-wind-49091088`, staging branch `br-billowing-art-bd38um5w`, staging compute `ep-crimson-cherry-bdz9jf81`, revision `c8ad20261120`, 10 public tables, and zero users/licenses/codes/products. Production compute is distinct (`ep-falling-bird-bdgbs39b`); no writes were made |
+| Neon leftovers | `VERIFIED`: three `test_*` schemas still exist: `test_419ef9234d58e644`, `test_71052392b993781a`, `test_eabedc40e0a21b1a`. They were not deleted or modified |
+| iPhone/signing | `BLOCKED`: Apple Mobile Device Service running; iTunes `12.13.10.3` reports device count `0`; no present Apple/iPhone USB device; iOS, pairing, trust and Developer Mode `NOT TESTED`; no signing or iOS deployment tools found; no certificate or profile available |
+| Independent review | `VERIFIED`: fresh read-only review of exact code head `3c38ca9` returned `APPROVE WITH NON-BLOCKING NOTES`; no blocking findings. Notes were that the load-command regression matrix covers only load/weak kinds although the implementation is kind-agnostic, and that the dylib mismatch test monkeypatches the pinned literal rather than asserting the literal itself. No code changed after this review; the following commit is documentation only. |
+
+### GO/NO-GO matrix
+
+| Gate | Status | Reason |
+| --- | --- | --- |
+| Static compatibility | `VERIFIED` | pinned source, identity policy, dylib structure, dry-run planner and CI evidence |
+| Signed pilot artifact | `NO-GO` | no signing identity/key, profile, entitlement set, or signed nested bundles |
+| Device availability | `NO-GO` | no readable/paired iPhone; iOS and Developer Mode unknown |
+| Runtime load proof | `NO-GO` | no launch and no `[XinstaCore] init=` evidence from the pilot process |
+| Coexistence/data isolation | `NO-GO` | untested on device; production app/data integrity unverified |
+| Authorization | `NO-GO` | no final owner approval for signing, installation, launch, or device changes |
+
+**Physical-device pilot decision: `NO-GO`.** Static and dry-run work is complete;
+no signed installable artifact exists and no device was changed.
+
+### Next three prioritized actions
+
+1. Obtain explicit owner approval and supply signing inputs for
+   `com.projectx.xinsta.pilot`, pilot App Groups, and a private registered device.
+2. Run the reviewed dry-run planner on the signed output and stop on any blocker
+   before any installer is used.
+3. Reconnect the iPhone read-only, record iOS/Developer Mode without private
+   identifiers, install only the pilot, and capture the single load-marker line.

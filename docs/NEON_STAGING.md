@@ -53,3 +53,34 @@ Read-only verification after migration:
 **Not yet performed:** connection of an always-on FastAPI service; live API HTTP calls to Neon; secret creation in GitHub (connector does not support writing repository secrets); authenticated customer onboarding; app attestation; production deployment; backups/restore drills and independent security review.
 
 **Next gate:** A trusted operator adds the staging connection URL to a secure test runtime, runs the guarded API suite, reviews connection authorization/TLS, and signs off before any staging API deployment. Never merge or deploy automatically.
+
+## Final read-only verification — 21 November 2026
+
+At code head `3c38ca96116acf4e689a9519e554ab4b8ff899a0`, the environment did not
+contain `NEON_STAGING_DATABASE_URL`. Both guarded scripts were run and failed
+closed without database access: `python -m scripts.check_neon_staging` exited 1
+with `NEON_STAGING_DATABASE_URL is required`, and
+`python -m scripts.run_neon_staging_tests` exited 1 with
+`Missing NEON_STAGING_DATABASE_URL`. No unrelated local configuration file was
+used as a credential source. Therefore **live guarded connection and live HTTP
+integration remain `BLOCKED`**, not failed tests and not a PostgreSQL pass.
+
+Read-only authorized Neon tooling confirmed:
+
+- project `late-wind-49091088`, staging branch `br-billowing-art-bd38um5w`, and
+  direct staging compute host `ep-crimson-cherry-bdz9jf81`;
+- production compute is distinct (`ep-falling-bird-bdgbs39b`) and was not read
+  for data or modified;
+- `public.alembic_version` is `c8ad20261120`, matching the committed head;
+- 10 expected `public` tables are present;
+- `users`, `licenses`, `activation_codes`, and `products` counts were all zero;
+- three leftover schemas still exist: `test_419ef9234d58e644`,
+  `test_71052392b993781a`, and `test_eabedc40e0a21b1a`. They were neither
+  cleaned nor modified; cleanup requires separate approval.
+
+CI at the same code head (`44912738704`) passed the offline Neon staging guard
+(`2 passed`) and local/ephemeral PostgreSQL migration checks, but CI did not
+contact Neon and skipped PostgreSQL API cases are not evidence of live staging
+integration. Required next access: a securely supplied direct staging URL with
+TLS and permission for isolated `test_*` schemas only; then run the two guarded
+scripts and verify schema cleanup.

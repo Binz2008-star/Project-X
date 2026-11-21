@@ -134,18 +134,19 @@ The parallel licensing API suite (run `44832109059`) passed on the same commit.
 These runs prove only the unsigned dylib compile, Core tests, simulator XCTests,
 and artifact structure — not Instagram integration or device behaviour.
 
-The private-pilot Objective-C source was last rebuilt on `macos-15` at commit
-`1c6395e42890be0d65c6f6a5099c3b0c6158fd64` in run `44909181721`, then again at
-`1108a38f1a7beec4fc588b509cfa9b558cd236cf` in run `44911332215` with unchanged
-Objective-C source: 114 Foundation assertions passed, 8 simulator XCTests
-passed, and the unsigned dylib passed structural verification in both runs. The
-published artifact is `libXinstaCore-unsigned-arm64-ios16.3` (latest run artifact
-ID `14710123024`) with SHA-256
+The private-pilot Objective-C source was last rebuilt on `macos-15` at code head
+`3c38ca96116acf4e689a9519e554ab4b8ff899a0` in run `44912738700`: 114 Foundation
+assertions passed, 8 simulator XCTests passed, and the unsigned dylib passed
+structural verification. The parallel API run `44912738704` also succeeded at
+that exact head. The published artifact is
+`libXinstaCore-unsigned-arm64-ios16.3`, artifact ID `14710343439`, with SHA-256
 `bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff`. A local
-bounded Mach-O read of the downloaded artifact confirmed one arm64 `MH_DYLIB`
-slice, minimum OS 16.3, 21 load commands, no code-signature load command,
-install name `@rpath/libXinstaCore.dylib`, and only system-library dependencies.
-This remains structural evidence; no device load has been performed.
+hash check and bounded Mach-O read of the downloaded artifact confirmed one
+arm64 `MH_DYLIB` slice, minimum OS 16.3, SDK 18.5, 21 load commands, no
+code-signature load command, install name `@rpath/libXinstaCore.dylib`, and only
+system-library dependencies. Earlier runs `44909181721` and `44911332215`
+produced the same bytes. This remains structural evidence; no device load has
+been performed.
 
 To reproduce locally on macOS:
 
