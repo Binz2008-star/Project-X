@@ -18,6 +18,8 @@ Status values: **FIXED** (code, regression test and local verification present),
 | A7-R1 | FIXED | Independent re-review finding: nested plist values now use the same typed validation and cannot emit non-string fields or crash the CLI. | Parametrised nested-plist tests and CLI mapping. |
 | A7-R2 | FIXED | Independent re-review finding: root detection no longer depends on a readable nested plist. | Root-without-plist inspection and CLI tests. |
 | A7-R3 | FIXED | Independent re-review finding: publication race can no longer overwrite the archive with report bytes. | Monkeypatched publication-race test; static symlink test retained. |
+| A7-R4 | FIXED | Provisioning-profile `Name` and `ExpirationDate` are strictly typed; malformed values produce fixed `PLIST_INVALID` and cannot break JSON serialization. | Parametrised profile-value tests plus valid-date round-trip test. |
+| A7-R5 | FIXED | Analyzer CLI uses a safe argument parser and fixed `FILE_NOT_FOUND` text; raw arguments and private paths are never echoed. | Invalid-option, unknown-option and private-path missing-file CLI tests. |
 
 ## PR #9 — Build Manager (B9)
 
@@ -31,6 +33,13 @@ Status values: **FIXED** (code, regression test and local verification present),
 | B9-6 | FIXED | Expected-severity map covers schema `1.0`/`1.1` and A7 codes; report severities recomputed. | `REPORT_INCONSISTENT` preflight and integration tests. |
 | B9-7 | FIXED | Bounded JSON CLI input (4 MiB, depth 64, 200,000 nodes), iterative pre-scan, fixed errors. | CLI input-limit tests. |
 | B9-8 | FIXED | PR base retargeted from `feature/xinsta-core` to `main`; `origin/main` merged without force; duplicated Xinsta Core commits removed from the PR diff. | `12ac403` clean diff; PR base retarget. Historical objects retained because no force/rewrite is permitted. |
+| B9-R1 | FIXED | `schema_version` is string-typed before allowlist membership; unhashable values fail closed. | Parametrised unhashable-schema tests. |
+| B9-R2 | FIXED | `report.macho.slices` must be a list of objects before slice inspection. | Non-list slice tests. |
+| B9-R3 | FIXED | Bounded JSON loader maps `ValueError` from oversized integers and malformed JSON to fixed `input_unreadable`. | 5000-digit integer CLI test. |
+| B9-R4 | FIXED | Verifier-raised codes are restricted to the module's fixed allowlist; arbitrary codes reduce to `AUTHORIZATION_VERIFIER_FAILED`. | Path-like verifier-code test. |
+| B9-R5 | FIXED | Verifier method/signer/provenance values are string-typed before allowlist membership. | Parametrised unhashable verifier-field tests. |
+| B9-R6 | FIXED | Build Manager documentation no longer claims the branch was unpushed and cites actual CI runs. | Docs-lint assertion. |
+| B9-R7 | FIXED | Build Manager documentation states both schema `1.0` and `1.1` are accepted. | Docs-lint assertion. |
 
 ## PR #10 — Integration (Phase C)
 
@@ -40,7 +49,7 @@ Status values: **FIXED** (code, regression test and local verification present),
 | C-2 | FIXED | Exact inspected-byte SHA-256 binding; appended archive bytes invalidate the manifest. | `test_hash_binding_uses_the_real_artifact_hash`, `test_modified_archive_bytes_break_the_exact_hash_binding`. |
 | C-3 | FIXED | Forged authorization, unexpected fields, unsafe identifiers, malformed report, ambiguous root and unsupported architecture rejected. | Integration rejection tests. |
 | C-4 | FIXED | Analyzer schema `1.1` and legacy `1.0` accepted; unknown schema rejected without echo. | `test_current_and_legacy_report_schemas_are_accepted`. |
-| C-5 | FIXED | No private paths, secret-looking values or local directories copied into output. | Warning-retention and CLI private-path tests, plus rejection no-echo assertions. |
+| C-5 | FIXED | No private paths, secret-looking values or local directories copied into output. Analyzer CLI now also uses fixed argument/missing-file errors. | Warning-retention and CLI private-path tests, A7-R5 tests, plus rejection no-echo assertions. |
 | C-6 | FIXED | Plan remains `dry_run`, `execution_permitted = false`, advisory authorization, blocked execution steps. | First integration test and B9 authorization tests. |
 
 ## Not code findings — owner/external blockers

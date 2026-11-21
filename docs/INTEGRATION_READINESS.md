@@ -45,10 +45,10 @@ This stacked increment converges the read-only IPA analyzer from Draft PR #7 wit
 
 Local Python 3.14.7 in the repository virtual environment (2026-11-21), with Windows `--basetemp` overrides:
 
-- `pytest -q tests/test_ipa_analysis.py` → **74 passed, 1 skipped** (symlink test unavailable on this filesystem; Linux CI exercises it).
-- `pytest -q tests/test_build_manager_preflight.py tests/test_build_manager_authorization.py` → **142 passed**.
+- `pytest -q tests/test_ipa_analysis.py` → **81 passed, 1 skipped** (symlink test unavailable on this filesystem; Linux CI exercises it).
+- `pytest -q tests/test_build_manager_preflight.py tests/test_build_manager_authorization.py` → **159 passed**.
 - `pytest -q tests/test_build_manager_integration.py` → **18 passed**.
-- Combined API, staging guard, analyzer, preflight, authorization and integration suites → **265 passed, 30 skipped**.
+- Combined API, staging guard, analyzer, preflight, authorization and integration suites → **289 passed, 30 skipped**.
 - `unittest discover -s tests -p test_licensing.py -v` → **OK (7 tests)**.
 - `python -m scripts.export_openapi --check` → **OpenAPI schema matches implementation**.
 - Isolated SQLite `alembic upgrade head` + `alembic check` → clean, no new upgrade operations.
@@ -72,7 +72,7 @@ CI uses Python 3.12. Exact final-head run IDs and results are recorded in the PR
 
 ## Independent review
 
-PR #7 required one correction round after its first independent `REQUEST CHANGES` verdict; the final head awaits a fresh explicit `APPROVE`/`REQUEST CHANGES` verdict. PR #9 and PR #10 independent reviews are pending. No PR is merge-ready until each has an explicit approval on its final head.
+Fresh independent reviews returned `REQUEST CHANGES` for all three prior final heads: PR #7 profiling/CLI privacy findings (A7-R4/R5), PR #9 malformed-input and documentation findings (B9-R1–R7), and PR #10 analyzer CLI privacy findings (also A7-R4/R5). All findings are fixed on the converged head; fresh explicit `APPROVE`/`REQUEST CHANGES` verdicts are pending. No PR is merge-ready until each has an explicit approval on its final head.
 
 ## Next executable milestone
 
