@@ -27,6 +27,7 @@ from project_x.ipa import (
 from project_x.ipa.bundle import BundleError
 from project_x.ipa.report import SCHEMA_VERSION
 from project_x.ipa.safety import raw_central_names
+import scripts.inspect_ipa as cli_module
 from scripts.inspect_ipa import main as cli_main
 
 MH_MAGIC = 0xFEEDFACE
@@ -800,6 +801,15 @@ def test_nested_app_does_not_make_root_ambiguous(tmp_path: Path):
     assert report.identity.bundle_id == "com.example.demo"
 
 
+def test_top_level_app_root_without_plist_is_still_ambiguous(tmp_path: Path):
+    entries = base_entries()
+    entries["Payload/Second.app/README.txt"] = b"another application root"
+    path = write_ipa(tmp_path / "Ambiguous.ipa", entries)
+
+    with pytest.raises(AmbiguousAppRootError):
+        inspect_ipa(path)
+
+
 @pytest.mark.parametrize(
     ("key", "value"),
     [
@@ -846,6 +856,52 @@ def test_cli_maps_ambiguous_root_to_stable_code(tmp_path: Path, capsys):
     path = write_ipa(tmp_path / "Ambiguous.ipa", entries)
     assert cli_main([str(path)]) == 2
     assert "AMBIGUOUS_APPLICATION_ROOT" in capsys.readouterr().err
+
+
+def test_cli_maps_root_without_plist_to_ambiguous_code(tmp_path: Path, capsys):
+    entries = base_entries()
+    entries["Payload/Second.app/README.txt"] = b"another application root"
+    path = write_ipa(tmp_path / "Ambiguous.ipa", entries)
+    assert cli_main([str(path)]) == 2
+    assert "AMBIGUOUS_APPLICATION_ROOT" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("CFBundleExecutable", 123),
+        ("CFBundleIdentifier", 456),
+        ("CFBundleName", ["Widget"]),
+        ("CFBundleShortVersionString", {"major": 1}),
+    ],
+)
+def test_malformed_nested_info_plist_values_are_refused(tmp_path: Path, key, value):
+    entries = base_entries()
+    nested = APP + "PlugIns/Widget.appex/"
+    nested_info = {
+        "CFBundleIdentifier": "com.example.demo.widget",
+        "CFBundleExecutable": "Widget",
+        key: value,
+    }
+    entries[nested + "Info.plist"] = plistlib.dumps(nested_info, fmt=plistlib.FMT_BINARY)
+    entries[nested + "Widget"] = build_macho()
+    path = write_ipa(tmp_path / "NestedMalformed.ipa", entries)
+
+    with pytest.raises(MalformedInfoPlistError):
+        inspect_ipa(path)
+
+
+def test_cli_maps_malformed_nested_plist_to_stable_code(tmp_path: Path, capsys):
+    entries = base_entries()
+    nested = APP + "PlugIns/Widget.appex/"
+    entries[nested + "Info.plist"] = plistlib.dumps(
+        {"CFBundleIdentifier": 123, "CFBundleExecutable": "Widget"}, fmt=plistlib.FMT_BINARY
+    )
+    entries[nested + "Widget"] = build_macho()
+    path = write_ipa(tmp_path / "NestedMalformed.ipa", entries)
+
+    assert cli_main([str(path)]) == 2
+    assert "INVALID_INFO_PLIST_VALUE" in capsys.readouterr().err
 
 
 def test_unreadable_provisioning_profile_is_reported(tmp_path: Path):
@@ -942,4 +998,28 @@ def test_cli_does_not_follow_output_symlink(tmp_path: Path, capsys):
     assert sentinel.read_text(encoding="utf-8") == "DO-NOT-OVERWRITE"
     assert output.is_file() and not output.is_symlink()
     assert "schema_version" in output.read_text(encoding="utf-8")
+    assert not list(tmp_path.glob(".inspect-ipa-*"))
+
+
+def test_cli_refuses_input_renamed_onto_output_during_publication(
+    tmp_path: Path, monkeypatch, capsys
+):
+    path = write_ipa(tmp_path / "Demo.ipa", base_entries())
+    before = path.read_bytes()
+    output = tmp_path / "report.json"
+    real_link = os.link
+    calls = {"count": 0}
+
+    def racing_link(source, target):
+        calls["count"] += 1
+        os.rename(path, target)
+        return real_link(source, target)
+
+    monkeypatch.setattr(cli_module.os, "link", racing_link)
+
+    assert cli_main([str(path), "--json", str(output)]) == 2
+    assert calls["count"] == 1
+    assert "OUTPUT_COLLIDES_WITH_INPUT" in capsys.readouterr().err
+    assert output.read_bytes() == before
+    assert not path.exists()
     assert not list(tmp_path.glob(".inspect-ipa-*"))

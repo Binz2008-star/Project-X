@@ -31,32 +31,83 @@ def _limits_from_args(args) -> ArchiveLimits | None:
     return ArchiveLimits(**overrides) if overrides else None
 
 
-def _output_collides(input_path: str, output_path: str) -> bool:
-    """True when writing ``output_path`` could overwrite the input archive."""
-    source = Path(input_path)
-    target = Path(output_path)
+class OutputCollisionError(Exception):
+    """The output target became the input archive before publication."""
+
+
+class OutputPublishError(Exception):
+    """The report could not be published without overwriting an existing target."""
+
+
+def _path_identity(path: str) -> tuple[int, int] | None:
     try:
-        if source.resolve() == target.resolve():
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (stat.st_dev, stat.st_ino)
+
+
+def _output_collides(
+    input_path: str,
+    output_path: str,
+    input_identity: tuple[int, int] | None = None,
+) -> bool:
+    """True when writing ``output_path`` could overwrite the input archive."""
+    source_identity = input_identity or _path_identity(input_path)
+    target_identity = _path_identity(output_path)
+    try:
+        if Path(input_path).resolve() == Path(output_path).resolve():
             return True
     except OSError:
         pass
+    if source_identity is not None and source_identity == target_identity:
+        return True
     try:
-        return os.path.samefile(source, target)
+        return os.path.samefile(input_path, output_path)
     except OSError:
         return False
 
 
-def _write_report(output_path: str, payload: str) -> None:
-    """Publish the report atomically without following a symlink at the target."""
+def _write_report(
+    output_path: str,
+    payload: str,
+    *,
+    input_path: str,
+    input_identity: tuple[int, int] | None,
+) -> None:
+    """Publish a report without following symlinks or overwriting the archive.
+
+    A temporary file is created in the destination directory. The target is
+    removed only after two collision checks, then the temporary file is
+    published with a no-overwrite hard link. If a concurrent rename places the
+    input archive at the target after the final check, the link fails and the
+    archive is left untouched instead of being replaced by report bytes.
+    """
+    if _output_collides(input_path, output_path, input_identity):
+        raise OutputCollisionError
     target = Path(output_path)
     descriptor, temporary_name = tempfile.mkstemp(prefix=".inspect-ipa-", dir=str(target.parent))
     temporary = Path(temporary_name)
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(payload + "\n")
-        # os.replace() replaces the directory entry, not the symlink target,
-        # so a symlink swapped in after the collision check cannot redirect it.
-        os.replace(temporary, target)
+        if _output_collides(input_path, output_path, input_identity):
+            raise OutputCollisionError
+        try:
+            if target.exists() or target.is_symlink():
+                target.unlink()
+        except OSError as exc:
+            raise OutputPublishError from exc
+        try:
+            os.link(temporary, target)
+        except FileExistsError as exc:
+            # A concurrent rename recreated the target after the final check.
+            # Never replace it: it may be the input archive.
+            if _output_collides(input_path, output_path, input_identity):
+                raise OutputCollisionError from exc
+            raise OutputPublishError from exc
+        except OSError as exc:
+            raise OutputPublishError from exc
     finally:
         if temporary.exists():
             temporary.unlink()
@@ -110,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    if args.json_out and _output_collides(args.ipa, args.json_out):
+    input_identity = _path_identity(args.ipa)
+    if args.json_out and _output_collides(args.ipa, args.json_out, input_identity):
         print(
             "REFUSED [OUTPUT_COLLIDES_WITH_INPUT] the report path is the input archive",
             file=sys.stderr,
@@ -141,7 +193,25 @@ def main(argv: list[str] | None = None) -> int:
 
     payload = report.to_json()
     if args.json_out:
-        _write_report(args.json_out, payload)
+        try:
+            _write_report(
+                args.json_out,
+                payload,
+                input_path=args.ipa,
+                input_identity=input_identity,
+            )
+        except OutputCollisionError:
+            print(
+                "REFUSED [OUTPUT_COLLIDES_WITH_INPUT] the report target became the input archive",
+                file=sys.stderr,
+            )
+            return 2
+        except OutputPublishError:
+            print(
+                "REFUSED [OUTPUT_WRITE_FAILED] the report could not be published safely",
+                file=sys.stderr,
+            )
+            return 2
 
     print(_summary(report) if args.summary else payload)
 

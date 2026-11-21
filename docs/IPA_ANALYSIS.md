@@ -56,18 +56,20 @@ The raw central-directory scan exists because Python's `zipfile` rewrites `\` to
 platform. Validating only `ZipFile.infolist()` would miss a Windows traversal attempt
 entirely. Both classic and ZIP64 end-of-central-directory records are parsed.
 
-### 3.1 Review-closure corrections (A7-1 … A7-7)
+### 3.1 Review-closure corrections (A7-1 … A7-7 and independent re-review)
 
 - **A7-1 / provenance:** the archive path is opened once. `zipfile`, the raw central-directory
   scan, all entry reads and the SHA-256 hash use the same descriptor. A size/mtime change
   detected before completion raises `ARCHIVE_CHANGED_DURING_ANALYSIS` rather than returning a
   report that mixes bytes from two files.
-- **A7-2 / ambiguity:** more than one top-level `Payload/*.app/` root raises
-  `AmbiguousAppRootError`; the CLI maps it to `REFUSED [AMBIGUOUS_APPLICATION_ROOT]`. Nested
-  `.app` bundles are still inventoried normally.
-- **A7-3 / metadata types:** identity values are type- and shape-checked. Wrong types, empty
-  strings, bad `UIDeviceFamily` entries and bad platform lists raise
-  `MalformedInfoPlistError`; the CLI maps it to `REFUSED [INVALID_INFO_PLIST_VALUE]`.
+- **A7-2 / ambiguity:** all top-level `Payload/*.app/` directories are derived from entry names
+  and implied directories, including roots without a readable `Info.plist`. More than one such
+  root raises `AmbiguousAppRootError`; the CLI maps it to `REFUSED [AMBIGUOUS_APPLICATION_ROOT]`.
+  Nested `.app` bundles are still inventoried normally.
+- **A7-3 / metadata types:** main and nested identity values are type- and shape-checked. Wrong
+  types, empty strings, bad `UIDeviceFamily` entries and bad platform lists raise
+  `MalformedInfoPlistError`; the CLI maps it to `REFUSED [INVALID_INFO_PLIST_VALUE]`. Nested
+  property-list read failures are skipped without echoing parser text into the report.
 - **A7-4 / unreadable profiles:** a present but unparsable `embedded.mobileprovision` emits a
   `PROVISIONING_PROFILE_UNREADABLE` warning with a fixed reason (`PLIST_MISSING`,
   `PLIST_INVALID` or `READ_ERROR`). No parser text or profile contents are copied.
@@ -75,13 +77,25 @@ entirely. Both classic and ZIP64 end-of-central-directory records are parsed.
   `nested_bundles_with_signature_metadata`, `app_signature_file_count` by
   `code_signature_entry_count`, and `is_xcode_managed` by `provisions_all_devices`. These
   names describe metadata presence, not signature validity. The report schema is now `1.1`.
-- **A7-6 / output safety:** `--json` writes to a temporary file in the destination directory
-  and publishes it with `os.replace()`, so a symlink swapped in at the target cannot redirect
-  the write. A collision with the input path is still refused.
+- **A7-6 / output safety:** `--json` writes to a temporary file in the destination directory.
+  The input descriptor identity is captured before analysis and checked again immediately before
+  publication. The target is unlinked only after those checks, then the report is published with
+  a no-overwrite hard link. A symlink cannot redirect the write, and a concurrent rename that puts
+  the input archive at the target makes publication fail closed with
+  `OUTPUT_COLLIDES_WITH_INPUT` or `OUTPUT_WRITE_FAILED`; the archive bytes are never replaced.
+  The output directory must be controlled by the caller.
 - **A7-7 / weak dependencies:** dependency refs retain their Mach-O load-command `kind`.
   Required unresolved `@rpath` references remain `UNRESOLVED_RPATH_DEPENDENCY` (critical);
   weak ones emit `WEAK_UNRESOLVED_RPATH_DEPENDENCY` (warning). CPU subtype `1` is normalised
   to `arm64` instead of the misleading `arm64v8`.
+
+### 3.2 Independent re-review corrections
+
+| ID | Correction | Regression evidence |
+| --- | --- | --- |
+| A7-R1 | Nested `.appex`/`.framework`/`.bundle` plists now use the same typed string validation as the main `Info.plist`, so invalid identity values cannot crash the CLI or produce non-string report fields. | Parametrised nested-plist tests plus CLI mapping test. |
+| A7-R2 | App-root detection no longer requires an `Info.plist` to infer a root; a second top-level `.app/` directory is ambiguous even when it contains only arbitrary files. | Root-without-plist inspection and CLI tests; existing nested-app counter-test retained. |
+| A7-R3 | Report publication rechecks the captured input identity, uses a no-overwrite hard link, and refuses to replace a target recreated during publication. | Race test that renames the input onto the output immediately before publication; static symlink test retained. |
 
 Downstream consumers must accept schema `1.1`. No private field names, local paths or raw
 parser text are emitted by the new refusal codes.
