@@ -92,8 +92,8 @@ runners with no Apple credentials.
   initialization diagnostics, and the load entry point.
 - A SwiftPM package runs XCTest cases on an unsigned iOS Simulator with
   `CODE_SIGNING_ALLOWED=NO`, covering controller initialisation, footer text,
-  row count, cell configuration, toggle persistence, out-of-range safety, and
-  inherited-initializer rejection.
+  row count, cell configuration, toggle persistence, out-of-range safety,
+  inherited-initializer rejection, and fail-closed presentation.
 
 ### Build evidence
 
@@ -187,11 +187,20 @@ catalog, or a claim that X Settings was shown in Instagram.
 
 ### Phase 3 verification
 
-Status: **pending CI on the exact development head**. The local Windows
-workspace can verify static evidence and the Python regression suites but
-cannot compile or run the iOS Foundation/simulator tests. The macOS workflow
-must report clean dylib compilation, Foundation assertions, simulator XCTests,
-and artifact validation before this section is updated with exact run IDs.
+GitHub Actions workflow-dispatch run `44854002545` on head
+`fbfdc5f2ab18db0233b9d7e0eab34181f5d169d1` completed successfully on
+`macos-15-arm64`:
+
+- unsigned iOS dylib compilation with strict warnings: passed;
+- `XinstaCore tests: 82 passed, 0 failed`;
+- `Executed 8 tests, with 0 failures (0 unexpected)` followed by
+  `** TEST SUCCEEDED **`;
+- `Xinsta Core artifact verified: unsigned arm64 iOS 16.3 Mach-O dylib`.
+
+The local Windows workspace independently verified `301 passed, 30 skipped`
+Python tests, `OK (7 tests)` for the legacy licensing suite, synchronized
+OpenAPI, and a clean `git diff --check`. These results do not prove Instagram
+runtime loading, hooking, presentation inside Instagram, or device behaviour.
 
 ## Model 1 review closure
 
