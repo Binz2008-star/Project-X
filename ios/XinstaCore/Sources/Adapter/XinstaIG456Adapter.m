@@ -6,6 +6,7 @@
 @property (nonatomic, strong) XinstaHostMetadata *hostMetadata;
 @property (nonatomic, copy, nullable) XinstaSymbolAvailability symbolAvailability;
 @property (nonatomic, strong) NSLock *stateLock;
+@property (nonatomic, assign) BOOL verifiedTargetRuntime;
 @end
 
 @implementation XinstaIG456Adapter
@@ -19,13 +20,17 @@
     dispatch_once(&onceToken, ^{
         XinstaHostMetadata *metadata = [XinstaHostMetadata metadataWithBundle:[NSBundle mainBundle]];
         adapter = [[self alloc] initWithHostMetadata:metadata
-                                 symbolAvailability:[self runtimeSymbolAvailability]];
+                                  symbolAvailability:[self runtimeSymbolAvailability]];
     });
     return adapter;
 }
 
++ (NSString *)adapterIdentifier {
+    return [XinstaCompatibility adapterIdentifier];
+}
+
 + (BOOL)runtimeSymbolAvailable:(NSString *)symbolName
-                targetClassName:(NSString *)className {
+                 targetClassName:(NSString *)className {
     if (symbolName.length == 0 || className.length == 0) {
         return NO;
     }
@@ -41,24 +46,26 @@
 }
 
 + (XinstaSymbolAvailability)runtimeSymbolAvailability {
+    NSString *targetClass = [XinstaCompatibility targetClassName];
     return ^BOOL(NSString *symbolName) {
         return [XinstaIG456Adapter runtimeSymbolAvailable:symbolName
-                                          targetClassName:@"IGProfileSheetTableViewController"];
+                                           targetClassName:targetClass];
     };
 }
 
 - (instancetype)initWithHostMetadata:(XinstaHostMetadata *)hostMetadata
-                  symbolAvailability:(nullable XinstaSymbolAvailability)symbolAvailability {
+                   symbolAvailability:(nullable XinstaSymbolAvailability)symbolAvailability {
     self = [super init];
     if (self) {
         _hostMetadata = hostMetadata;
         _symbolAvailability = [symbolAvailability copy];
         _stateLock = [[NSLock alloc] init];
         _compatibilityAccepted = NO;
+        _verifiedTargetRuntime = NO;
         _compatibilityReport = [[XinstaCompatibilityReport alloc] initWithSupported:NO
-                                                                         reasonCode:XinstaCompatibilityReasonNotChecked
-                                                                             reason:@"Compatibility has not been checked"
-                                                                    missingSymbols:@[]];
+                                                                          reasonCode:XinstaCompatibilityReasonNotChecked
+                                                                              reason:@"Compatibility has not been checked"
+                                                                     missingSymbols:@[]];
     }
     return self;
 }
@@ -77,6 +84,13 @@
     return accepted;
 }
 
+- (BOOL)targetRuntimeVerified {
+    [self.stateLock lock];
+    BOOL verified = _verifiedTargetRuntime;
+    [self.stateLock unlock];
+    return verified;
+}
+
 - (BOOL)evaluateCompatibility {
     [self.stateLock lock];
     if (_compatibilityAccepted) {
@@ -85,11 +99,13 @@
     }
 
     XinstaCompatibilityReport *report = [XinstaCompatibility checkBundleIdentifier:self.hostMetadata.bundleIdentifier
-                                                                           version:self.hostMetadata.version
-                                                                             build:self.hostMetadata.build
-                                                                 symbolAvailability:self.symbolAvailability];
+                                                                            version:self.hostMetadata.version
+                                                                              build:self.hostMetadata.build
+                                                                  symbolAvailability:self.symbolAvailability];
     _compatibilityReport = report;
     _compatibilityAccepted = report.supported;
+    _verifiedTargetRuntime = report.supported &&
+        ![report.missingSymbols containsObject:[XinstaCompatibility targetClassName]];
     BOOL accepted = report.supported;
     [self.stateLock unlock];
     return accepted;

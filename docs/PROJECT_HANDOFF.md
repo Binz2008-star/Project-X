@@ -1,8 +1,18 @@
 # Project X — Project Handoff
 
-**Updated:** 20 November 2026  
+**Updated:** 21 November 2026
+
 **Status:** engineering prototype; **NOT production-ready**  
 **Scope:** this handoff summarizes the iOS Plus product direction and the current licensing-backend work. For implementation details, see [ENGINEERING_HANDOFF.md](ENGINEERING_HANDOFF.md). For authoritative implementation limitations, see [API_STATUS.md](API_STATUS.md), and for actual Neon facts, see [NEON_STAGING.md](NEON_STAGING.md).
+
+## Current checkpoint (21 November 2026)
+
+- `origin/main` is `0ecbe9c`, the reviewed iOS Core foundation ([PR #8](https://github.com/Binz2008-star/Project-X/pull/8)). No merge or deployment has been authorized for the newer draft chain.
+- The current draft review chain is [PR #7](https://github.com/Binz2008-star/Project-X/pull/7) `46816c5` (read-only IPA analyzer), [PR #9](https://github.com/Binz2008-star/Project-X/pull/9) `705bcd9` (fail-closed Build Manager preflight), and [PR #10](https://github.com/Binz2008-star/Project-X/pull/10) `8c1ac3c` (analyzer-to-preflight integration). Independent final-head `APPROVE` verdicts are recorded in the PR evidence comments; all three remain **OPEN DRAFT**.
+- [PR #11](https://github.com/Binz2008-star/Project-X/pull/11) `5bc5314` is a separate **OPEN DRAFT** for `feature/xinsta-static-integration`, based on `feature/integration-readiness` so its diff stays limited to the read-only IG456 static evidence and inert Xinsta Core diagnostics/settings work.
+- The read-only 456 class→selector→encoding table is complete (52,806 classes, 187,670 unique rows). It is recorded in [IG456_STATIC_EVIDENCE.md](IG456_STATIC_EVIDENCE.md) and is a static prerequisite only, not hook proof.
+- Owner-directed hold: PRs #7/#9/#10 and any merge/readiness transition remain frozen until the single vertical-slice hook result is in. PR #11 is documentation/static-only and is not merge authorization.
+- Runtime proof remains absent: no IPA execution, injection, signing, repackaging, installation, device test, or verified hook has been performed. See [IG456_STATIC_EVIDENCE.md](IG456_STATIC_EVIDENCE.md) and [XINSTA_CORE.md](XINSTA_CORE.md).
 
 ## Purpose and product boundary
 
@@ -21,7 +31,7 @@ Instagram, Snapchat, YouTube and TikTok may be separate product records in the s
 | 3 — correctness | Same-account/same-operation activation and renewal retry idempotency; atomic redemption, concurrent renewals, device-registration quota locking and event history | [PR #3](https://github.com/Binz2008-star/Project-X/pull/3) |
 | 4 — staging | Neon PostgreSQL 18 `staging` branch, applied committed Alembic schema, checked constraints, guarded staging verification tooling; **no deployed service** | [PR #4](https://github.com/Binz2008-star/Project-X/pull/4) |
 
-All four PRs are **draft and stacked**, targeting one another: `main` ← phase 1 ← phase 2 ← phase 3 ← Neon staging readiness. The current `main` contains only the initial bootstrap README. Do not mistake feature-branch code for production-deployed code. **Do not merge, deploy, or publish without explicit owner authorization.**
+These four were the original **draft and stacked** licensing PRs: `main` ← phase 1 ← phase 2 ← phase 3 ← Neon staging readiness. That chain is historical; `origin/main` has since advanced to `0ecbe9c` with the reviewed iOS Core foundation, while the newer draft chain is listed in the checkpoint above. Do not mistake feature-branch code for production-deployed code. **Do not merge, deploy, or publish without explicit owner authorization.**
 
 The documentation handoff is proposed in a separate branch/PR; it does not authorize any merge.
 

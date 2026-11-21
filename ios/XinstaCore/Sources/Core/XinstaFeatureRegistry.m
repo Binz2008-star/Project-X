@@ -16,26 +16,40 @@ static NSString *const XinstaFeatureOverrideKey = @"xinsta.core.featureOverrides
             [[XinstaFeature alloc] initWithIdentifier:@"info"
                                                 title:@"Build Information"
                                           description:@"Shows the verified version and adapter state."
-                                     enabledByDefault:YES],
+                                     enabledByDefault:YES
+                                    adapterIdentifier:XinstaAdapterIdentifierIG456],
             [[XinstaFeature alloc] initWithIdentifier:@"demo.toggle"
                                                 title:@"Demo Option"
                                           description:@"Harmless local toggle used to validate registry persistence."
-                                     enabledByDefault:NO],
+                                     enabledByDefault:NO
+                                    adapterIdentifier:XinstaAdapterIdentifierIG456],
             [[XinstaFeature alloc] initWithIdentifier:@"accessibility"
                                                 title:@"Accessibility Labels"
                                           description:@"Reserved for owned enhancements; no effect in this increment."
-                                     enabledByDefault:YES],
+                                     enabledByDefault:YES
+                                    adapterIdentifier:XinstaAdapterIdentifierIG456],
         ];
-        registry = [[self alloc] initWithFeatures:features userDefaults:[NSUserDefaults standardUserDefaults]];
+        registry = [[self alloc] initWithFeatures:features
+                                      userDefaults:[NSUserDefaults standardUserDefaults]
+                                 adapterIdentifier:XinstaAdapterIdentifierIG456];
     });
     return registry;
 }
 
 - (instancetype)initWithFeatures:(NSArray<XinstaFeature *> *)features
-                     userDefaults:(NSUserDefaults *)userDefaults {
+                      userDefaults:(NSUserDefaults *)userDefaults
+                 adapterIdentifier:(NSString *)adapterIdentifier {
     self = [super init];
     if (self) {
-        _features = [features copy];
+        _adapterIdentifier = [adapterIdentifier copy];
+        NSMutableArray<XinstaFeature *> *bound = [NSMutableArray array];
+        for (XinstaFeature *feature in features) {
+            if ([feature isKindOfClass:[XinstaFeature class]] &&
+                [feature.adapterIdentifier isEqualToString:_adapterIdentifier]) {
+                [bound addObject:feature];
+            }
+        }
+        _features = [bound copy];
         _userDefaults = userDefaults;
     }
     return self;
@@ -53,7 +67,7 @@ static NSString *const XinstaFeatureOverrideKey = @"xinsta.core.featureOverrides
     return NO;
 }
 
-/// Returns only well-typed values for currently registered identifiers.
+/// Returns only well-typed values for currently registered, bound identifiers.
 /// Malformed defaults and stale keys are ignored, never propagated.
 - (NSDictionary<NSString *, NSNumber *> *)validatedOverrides {
     id stored = [self.userDefaults objectForKey:XinstaFeatureOverrideKey];

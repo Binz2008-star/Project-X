@@ -14,6 +14,10 @@
     return self;
 }
 
+- (NSString *)adapterIdentifier {
+    return self.registry.adapterIdentifier;
+}
+
 - (NSArray<XinstaFeature *> *)features {
     return self.registry.features;
 }
@@ -39,6 +43,10 @@
     if (feature) {
         [self.registry setEnabled:enabled forIdentifier:feature.identifier];
     }
+}
+
+- (NSDictionary<NSString *, NSNumber *> *)currentFeatureStates {
+    return [self.registry effectiveStates];
 }
 
 - (NSString *)statusTextForReport:(nullable XinstaCompatibilityReport *)report {

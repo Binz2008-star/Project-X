@@ -9,6 +9,7 @@
 #import "XinstaSettingsDataSource.h"
 #import "XinstaIG456Adapter.h"
 #import "XinstaSettingsViewController.h"
+#import "XinstaSettingsPresenter.h"
 
 @interface XinstaSettingsViewController (XinstaTesting)
 - (void)toggleChanged:(UISwitch *)sender;
@@ -22,6 +23,8 @@
 @property (nonatomic, strong) XinstaSettingsDataSource *dataSource;
 @property (nonatomic, strong) XinstaIG456Adapter *adapter;
 @property (nonatomic, strong) XinstaSettingsViewController *controller;
+@property (nonatomic, strong) UIWindow *window;
+@property (nonatomic, strong) UIViewController *presenter;
 
 @end
 
@@ -37,14 +40,17 @@
         [[XinstaFeature alloc] initWithIdentifier:@"info"
                                             title:@"Build Information"
                                       description:@"Build information row"
-                                 enabledByDefault:YES],
+                                 enabledByDefault:YES
+                                adapterIdentifier:XinstaAdapterIdentifierIG456],
         [[XinstaFeature alloc] initWithIdentifier:@"demo.toggle"
                                             title:@"Demo Option"
                                       description:@"Demo toggle row"
-                                 enabledByDefault:NO],
+                                 enabledByDefault:NO
+                                adapterIdentifier:XinstaAdapterIdentifierIG456],
     ];
     self.registry = [[XinstaFeatureRegistry alloc] initWithFeatures:features
-                                                       userDefaults:self.defaults];
+                                                        userDefaults:self.defaults
+                                                   adapterIdentifier:XinstaAdapterIdentifierIG456];
     self.dataSource = [[XinstaSettingsDataSource alloc] initWithRegistry:self.registry];
 
     XinstaHostMetadata *metadata = [[XinstaHostMetadata alloc]
@@ -52,15 +58,23 @@
                          version:[XinstaCompatibility supportedVersion]
                            build:[XinstaCompatibility supportedBuild]];
     self.adapter = [[XinstaIG456Adapter alloc] initWithHostMetadata:metadata
-                                                symbolAvailability:^BOOL(NSString *symbolName) {
-                                                    return symbolName.length > 0;
-                                                }];
+                                                 symbolAvailability:^BOOL(NSString *symbolName) {
+                                                     return symbolName.length > 0;
+                                                 }];
     self.controller = [[XinstaSettingsViewController alloc] initWithDataSource:self.dataSource
-                                                                       adapter:self.adapter];
+                                                                        adapter:self.adapter];
+
+    self.presenter = [[UIViewController alloc] init];
+    self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+    self.window.rootViewController = self.presenter;
+    [self.window makeKeyAndVisible];
 }
 
 - (void)tearDown {
     [self.defaults removePersistentDomainForName:self.suiteName];
+    self.window.hidden = YES;
+    self.window = nil;
+    self.presenter = nil;
     self.controller = nil;
     self.adapter = nil;
     self.dataSource = nil;
@@ -85,19 +99,19 @@
     }
     XCTAssertNotNil(statusLabel);
     XCTAssertEqualObjects(statusLabel.text,
-                          [self.dataSource statusTextForReport:self.adapter.compatibilityReport]);
+                           [self.dataSource statusTextForReport:self.adapter.compatibilityReport]);
 }
 
 - (void)testRowCountAndCellConfiguration {
     [self.controller loadViewIfNeeded];
 
     NSInteger rows = [self.controller tableView:self.controller.tableView
-                          numberOfRowsInSection:0];
+                           numberOfRowsInSection:0];
     XCTAssertEqual(rows, (NSInteger)self.dataSource.numberOfRows);
 
     NSIndexPath *firstRow = [NSIndexPath indexPathForRow:0 inSection:0];
     UITableViewCell *cell = [self.controller tableView:self.controller.tableView
-                                  cellForRowAtIndexPath:firstRow];
+                                   cellForRowAtIndexPath:firstRow];
     XCTAssertNotNil(cell);
     XCTAssertEqualObjects(cell.textLabel.text, @"Build Information");
     XCTAssertTrue([cell.accessoryView isKindOfClass:[UISwitch class]]);
@@ -128,10 +142,57 @@
     NSIndexPath *outOfRange = [NSIndexPath indexPathForRow:99 inSection:0];
     UITableViewCell *cell = nil;
     XCTAssertNoThrow(cell = [self.controller tableView:self.controller.tableView
-                                 cellForRowAtIndexPath:outOfRange]);
+                                  cellForRowAtIndexPath:outOfRange]);
     XCTAssertNotNil(cell);
     XCTAssertEqualObjects(cell.textLabel.text, @"");
     XCTAssertNil(cell.accessoryView);
+}
+
+- (void)testPresenterFailsClosedBeforeAdapterAcceptance {
+    XinstaSettingsPresenter *presenter =
+        [[XinstaSettingsPresenter alloc] initWithAdapter:self.adapter
+                                              dataSource:self.dataSource];
+    XCTAssertFalse(presenter.canPresent);
+    XCTAssertNil([presenter makeSettingsViewController]);
+    XCTAssertFalse([presenter presentFromViewController:self.presenter
+                                              animated:NO
+                                            completion:nil]);
+    XCTAssertNil(self.presenter.presentedViewController);
+}
+
+- (void)testPresenterShowsSettingsAfterAcceptance {
+    XCTAssertTrue([self.adapter evaluateCompatibility]);
+    XinstaSettingsPresenter *presenter =
+        [[XinstaSettingsPresenter alloc] initWithAdapter:self.adapter
+                                              dataSource:self.dataSource];
+    XCTAssertTrue(presenter.canPresent);
+    XCTAssertTrue([presenter presentFromViewController:self.presenter
+                                              animated:NO
+                                            completion:nil]);
+    XCTAssertTrue([self.presenter.presentedViewController isKindOfClass:[UINavigationController class]]);
+    UINavigationController *navigation = (UINavigationController *)self.presenter.presentedViewController;
+    XCTAssertTrue([navigation.topViewController isKindOfClass:[XinstaSettingsViewController class]]);
+}
+
+- (void)testPresenterFailsClosedWhenTargetIsMissing {
+    XinstaHostMetadata *metadata = [[XinstaHostMetadata alloc]
+        initWithBundleIdentifier:[XinstaCompatibility supportedBundleIdentifier]
+                         version:[XinstaCompatibility supportedVersion]
+                           build:[XinstaCompatibility supportedBuild]];
+    XinstaIG456Adapter *missingTarget = [[XinstaIG456Adapter alloc]
+        initWithHostMetadata:metadata
+           symbolAvailability:^BOOL(NSString *symbolName) {
+               return ![symbolName isEqualToString:[XinstaCompatibility targetClassName]];
+           }];
+    XCTAssertFalse([missingTarget evaluateCompatibility]);
+    XinstaSettingsPresenter *presenter =
+        [[XinstaSettingsPresenter alloc] initWithAdapter:missingTarget
+                                              dataSource:self.dataSource];
+    XCTAssertFalse(presenter.canPresent);
+    XCTAssertFalse([presenter presentFromViewController:self.presenter
+                                              animated:NO
+                                            completion:nil]);
+    XCTAssertNil(self.presenter.presentedViewController);
 }
 
 - (void)testInheritedInitializersAreRejected {
@@ -160,7 +221,7 @@
 }
 
 - (void)assertInvalidArgumentRaisedBy:(void (^)(void))block
-                          description:(NSString *)description {
+                           description:(NSString *)description {
     BOOL raisedExpectedException = NO;
     @try {
         block();
