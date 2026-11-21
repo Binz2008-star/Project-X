@@ -42,8 +42,11 @@ jobs:
         run: python -m pytest -q tests/test_neon_staging_check.py
       - name: IPA analyzer tests
         run: python -m pytest -q tests/test_ipa_analysis.py
-      - name: IPA build manager preflight tests
-        run: python -m pytest -q tests/test_build_manager_preflight.py
+      - name: IPA build manager preflight and authorization tests
+        run: >-
+          python -m pytest -q
+          tests/test_build_manager_preflight.py
+          tests/test_build_manager_authorization.py
       - name: IPA analyzer to build-manager contract tests
         run: python -m pytest -q tests/test_build_manager_integration.py
       - name: Original local licensing regression tests
