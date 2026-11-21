@@ -241,6 +241,53 @@ This is a gated plan, not an execution permit:
 Current status: steps 1–3 are `VERIFIED`/`BLOCKED` as noted above; steps 4–7 are
 `BLOCKED`/`NOT TESTED`. No installable `Xinsta.ipa` exists yet.
 
+## Build execution gate — 21 November 2026
+
+The requested move from planning to a real `Xinsta.ipa` was attempted only as far
+as authorized read-only verification. **No installable IPA was produced**, no
+output path or hash exists, and no host software was installed.
+
+| Area | Finding |
+| --- | --- |
+| Repository | `VERIFIED`: clean HEAD `b5dd8fb83196eaee6c96b8a174268694c61e9a22`, `0/0` upstream; CI green at that head (`44914908466`, `44914908475`) |
+| Source IPA | `VERIFIED`: pinned hash `665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131`, `com.burbn.instagram`, `456.0.0` (`1114925422`), min iOS 16.3, arm64, encrypted `0`, 8 extensions, 8 URL schemes, 6 frameworks, 9 resource bundles |
+| Core artifact | `VERIFIED`: unsigned arm64 iOS 16.3 dylib hash `bf58dd04ca747d2d489c92509c9b8e96e2946197ee868c3245fbf5a50a0accff`, install name `@rpath/libXinstaCore.dylib`, system-only dependencies |
+| Pilot identity | `VERIFIED`: `com.projectx.xinsta.pilot`, display name `Xinsta`, adapter `com.projectx.xinsta.pilot@456.0.0@1114925422`, pilot URL scheme and extension/App Group prefixes pinned |
+| Build implementation | `BLOCKED`: `project_x/packaging` is explicitly dry-run-only. No extractor, Info.plist rewriter, dylib injector, load-command editor, nested re-signer, IPA writer, Sideloadly integration, or device executor exists. The only IPA zip writers are test fixtures |
+| Test coverage | `VERIFIED`: 7 planner tests cover deterministic dry-run output, source/dylib hash rejection, Core load-command rejection, duplicate rpath rejection, invalid dylibs, and path-safe CLI errors. CI also passes analyzer, Build Manager, authorization, contract, and Core suites |
+| Core runtime behavior | `VERIFIED`: a constructor emits `[XinstaCore] init=...`, evaluates the compatibility gate, builds a feature registry, and can construct X Settings UI objects. No swizzling, method replacement, hooking, or host-class modification is implemented. Device load remains `NOT TESTED` |
+| Rights | `BLOCKED`: `AGENTS.md` forbids unlicensed Instagram IPA modification; `docs/RIGHTS_REGISTER.md` records only a scoped private load-only proof and no original-app modification right. Chat approval for a personal test is not a license from the rights holder |
+| Windows/Sideloadly | `BLOCKED`: Sideloadly absent; `winget` absent; AMD64 host; web iTunes `12.13.10.3` and Apple Mobile Device Service present; no Microsoft Store iTunes/iCloud packages found; no device, cert, profile, or signing tools present |
+| Device | `BLOCKED`: iTunes device count `0`; no Apple USB device; iOS version, pairing, trust, and Developer Mode `NOT TESTED` |
+| Artifact status | `BLOCKED`: no `Xinsta.ipa` output path, no final IPA hash, no signature verification, no installation, no runtime result |
+
+### Exact remaining blockers
+
+1. **Rights evidence:** written, non-secret evidence of permission to modify this
+   exact third-party IPA for one owner-controlled device. Until supplied,
+   building a modified Instagram binary would violate the repository's stated
+   rights boundary.
+2. **Host software approval:** download and run the official 64-bit Sideloadly
+   installer from `https://sideloadly.io/SideloadlySetup64.exe` (v0.71.0),
+   verify its Authenticode signature and hash, and accept any UAC prompt. This
+   was **not** done because host-software installation needs specific approval.
+3. **Packaging executor:** an approved external packaging step must create the
+   disposable app copy, rewrite identities/entitlements/extensions, inject the
+   dylib, insert the load command, re-sign all nested components, and write the
+   IPA. The repository must not be represented as already having this executor.
+4. **Device/signing inputs:** connect and trust the owner's iPhone, confirm iOS
+   and Developer Mode, and supply Apple signing credentials only inside the
+   signing tool, never in the repository, logs, or chat.
+5. **Post-build verification:** analyzer, signature/provisioning checks, final
+   hash, install, launch, and load-marker evidence can only be reported after
+   an actual artifact exists.
+
+### Next executable action
+
+Obtain the rights evidence and the specific Sideloadly-install approval. Do not
+create a placeholder IPA, do not substitute Sideloadly for the missing packaging
+executor, and do not modify the original `F:\Instagram.ipa`.
+
 ## Candidate final installation procedure
 
 Every step below is `BLOCKED` until an independent reviewer approves the exact

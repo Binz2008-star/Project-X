@@ -12,6 +12,18 @@
 | TikTok iOS | Proprietary original application | Proprietary | Not established | Obtain authorization or switch to owned original |
 | Project X original licensing prototype | Local feature entitlements | Original code owned by Project X creator; no third-party redistribution license granted | Internal demonstration only | Implement production controls after rights clearance |
 
+## Personal modified-IPA build status — 21 November 2026
+
+No `Xinsta.ipa` was produced. The private-pilot builder remains blocked because
+this register records no written original-app modification permission. An owner
+message approving a personal test is not a license from the third-party rights
+holder and does not override the repository rule against unlicensed Instagram
+IPA modification. The required next input is a private written scope or rights
+reference covering modification of the exact pinned IPA hash for one
+owner-controlled device. Keep that evidence out of GitHub and retain it in the
+owner's private records. No commercial use, redistribution, or App Store path is
+implied.
+
 ## Questions for potential white-label/commercial partners
 
 Ask for written evidence covering source-code ownership; scope of commercial use; white-labeling and modification; redistribution/sublicensing rights; third-party original-app permission; trademarks; license price and royalty; app account-login compatibility; update commitments and security response; refund/termination provisions; source maintenance and continuity.
