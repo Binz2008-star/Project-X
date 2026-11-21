@@ -40,8 +40,11 @@ jobs:
         run: python -m pytest -q tests/test_api.py
       - name: Neon staging connection guard (offline tests)
         run: python -m pytest -q tests/test_neon_staging_check.py
-      - name: IPA build manager preflight tests
-        run: python -m pytest -q tests/test_build_manager_preflight.py
+      - name: IPA build manager preflight and authorization tests
+        run: >-
+          python -m pytest -q
+          tests/test_build_manager_preflight.py
+          tests/test_build_manager_authorization.py
       - name: Original local licensing regression tests
         run: python -m unittest discover -s tests -p 'test_licensing.py' -v
       - name: Schema migration applies and matches ORM
