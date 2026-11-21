@@ -1,6 +1,6 @@
 # IPA Build Manager — dry-run preflight gate
 
-Status: **isolated preflight/planning increment implemented and locally tested; no build, sign, repackage, install, or device action is included.** This branch stacks on the Xinsta Core draft PR because it inherits the same safety boundary; it does not change that PR.
+Status: **fail-closed preflight/planning increment implemented, locally tested and CI-verified in the Draft PR stack; no build, sign, repackage, install, or device action is included.** PR #9 base was retargeted from `feature/xinsta-core` to `main`; its diff now contains only Build Manager files.
 
 ## What this increment does
 
@@ -113,7 +113,7 @@ Exit codes: `0` preflight passed, `2` preflight rejected, `1` unreadable/oversiz
 
 ## Verification
 
-B9 correction set (this branch): `142 passed` for `tests/test_build_manager_preflight.py` together with `tests/test_build_manager_authorization.py` using the repository virtualenv on 2026-11-21, with `git diff --check` clean. No CI run is claimed for this branch; it has not been pushed.
+B9 correction set: `142 passed` for `tests/test_build_manager_preflight.py` together with `tests/test_build_manager_authorization.py` using the repository virtualenv on 2026-11-21; combined API/staging run `31 passed, 29 skipped`; `git diff --check` clean. CI now runs both Build Manager suites. Exact final-head run IDs are recorded in the PR bodies.
 
 Earlier local/CI evidence below applies to prior commits only and does not cover the B9 changes:
 
@@ -136,6 +136,19 @@ The first independent review returned `REQUEST CHANGES` with two Medium findings
 Independent re-review at code head `d9db3445c6ec5029456849e7ba0501ffcf2f7613` returned **APPROVE** with no Critical, High, Medium, or Low findings. The reviewer confirmed the three fixes, verified that the new tests fail against the pre-fix code, checked the analyzer finding codes against the then-current allowlist, and verified CI runs `44836339224`, `44836348720`, `44836590901`, and `44836598327` from actual logs. That approval predates the B9 changes; the allowlist now also covers the A7 correction codes.
 
 No merge or deployment is implied by this approval. PR #9 remains DRAFT pending explicit owner authorization.
+
+## B9 closure summary
+
+| ID | Status | Fix |
+| --- | --- | --- |
+| B9-1 | FIXED | Advisory declaration labelled explicitly; no cryptographic authorization claim. |
+| B9-2 | FIXED | Fail-closed `authorization.py` permit gate; default reject; valid permit still dry-run-only. |
+| B9-3 | FIXED | Analyzer-to-preflight tests remain only in PR #10. |
+| B9-4 | FIXED | Bounded, output-safe identity strings with fixed rejection codes. |
+| B9-5 | FIXED | arm64/arm64e normalization and subtype `1` handling; unsupported architectures blocked. |
+| B9-6 | FIXED | Expected-severity map covers schema `1.0`/`1.1` and A7 codes; report severities not trusted. |
+| B9-7 | FIXED | Bounded JSON CLI input with iterative pre-scan and fixed errors. |
+| B9-8 | FIXED | PR #9 base retargeted to `main`; duplicated Xinsta Core commits removed from the PR diff without history rewrite. |
 
 ## Security and compatibility considerations
 
