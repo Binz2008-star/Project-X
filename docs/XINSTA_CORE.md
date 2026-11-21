@@ -10,13 +10,15 @@ install any Instagram application, and it performs **no method swizzling**.
 
 - iOS only. Minimum deployment target: iOS 16.3 (matches the analysed IPA).
 - No Android, no jailbreak, no storefront, no payment.
-- The reference IPA (`F:\Instagram.ipa`, owner-provided) was read only through
-  the protected `SafeArchive` tooling. No IPA binary, extracted payload,
-  certificate, or provisioning profile is stored in this repository.
+- The owner-provided reference IPA was read only through the protected
+  `SafeArchive` tooling. No IPA binary, extracted payload, certificate, or
+  provisioning profile is stored in this repository.
 - The adapter is metadata-only. It rejects a host unless **all** of the
   following match: bundle identifier `com.burbn.instagram`, version `456.0.0`,
   build `1114925422`, and runtime visibility of every required Objective-C name.
   A pass changes only a status value; it does not modify any Instagram class.
+- Every feature declares the adapter it is bound to. Features for another
+  adapter are filtered out, cannot be toggled, and cannot be presented.
 - `compatibilityAccepted == YES` means “the exact host metadata and symbols
   were observed”. It does **not** mean Instagram was hooked, a tweak was
   injected, or X Settings was shown inside Instagram.
@@ -28,21 +30,23 @@ ios/XinstaCore/
   Package.swift                       # minimal SwiftPM package for simulator XCTest
   Sources/
     Core/
-      XinstaFeature.h/.m              # inert feature descriptor
-      XinstaFeatureRegistry.h/.m      # validated defaults + explicit overrides
+      XinstaFeature.h/.m              # inert, adapter-bound feature descriptor
+      XinstaFeatureRegistry.h/.m      # adapter-scoped defaults + explicit overrides
       XinstaHostMetadata.h/.m         # injectable bundle metadata value object
-      XinstaCompatibility.h/.m        # identity/version/build/symbol gate
+      XinstaCompatibility.h/.m        # identity/version/build/target gate
       XinstaSettingsDataSource.h/.m   # Foundation-only settings model
     Adapter/
       XinstaIG456Adapter.h/.m         # 456.0.0-specific read-only checks
+      XinstaDiagnostic.h/.m           # fixed-code initialization diagnostic
     UI/
       XinstaSettingsViewController.h/.m  # standalone UIKit settings screen
+      XinstaSettingsPresenter.h/.m    # caller-driven, fail-closed presentation
     XinstaCore.h/.m                   # dylib load entry, @autoreleasepool
   Scripts/
     build-dylib.sh                    # unsigned arm64 iOS dylib + strict validation
     run-tests.sh                      # Foundation-only tests on macOS
   Tests/
-    XinstaCoreTests.m                 # 58 Foundation assertions
+    XinstaCoreTests.m                 # Foundation assertions for gate and Phase 3 behavior
     XinstaUIKitTests/                 # iOS Simulator XCTest cases
 ```
 
@@ -69,6 +73,11 @@ a selector or that swizzling it is safe. The adapter rechecks every symbol with
 `objc_getClass` / `class_getInstanceMethod`. Even a passing check only records
 readiness; it does not activate a hook.
 
+See `docs/IG456_STATIC_EVIDENCE.md` for the full DLInsta 3.0.0 / 3.0.2
+comparison and the target 456 compatibility matrix. That report uses only
+`VERIFIED`, `FAILED`, `BLOCKED`, and `NOT TESTED`: it does not promote selector
+strings to hooks or preference APIs to a verified preference-to-hook linkage.
+
 ## Build and tests
 
 Local work happens on Windows; compilation and tests run on GitHub macOS
@@ -77,9 +86,10 @@ runners with no Apple credentials.
 - Workflow: `.github/workflows/xinsta-core-build.yml` (`macos-15`).
 - `build-dylib.sh` compiles `libXinstaCore.dylib` for `arm64-apple-ios16.3`,
   unsigned, with `-O2 -Wall -Wextra -Werror` preserved.
-- `run-tests.sh` compiles and runs 58 Foundation-only assertions covering
-  feature registration, hardened persistence, settings behaviour, compatibility
-  rejection, injected adapter behaviour, and runtime symbol lookup.
+- `run-tests.sh` compiles and runs Foundation-only assertions covering feature
+  registration, adapter binding, hardened persistence, fresh settings reads,
+  compatibility rejection, injected adapter behaviour, runtime symbol lookup,
+  initialization diagnostics, and the load entry point.
 - A SwiftPM package runs XCTest cases on an unsigned iOS Simulator with
   `CODE_SIGNING_ALLOWED=NO`, covering controller initialisation, footer text,
   row count, cell configuration, toggle persistence, out-of-range safety, and
@@ -103,6 +113,9 @@ Xinsta Core artifact validation passed: unsigned arm64 iOS 16.3 dylib
 XinstaCore tests: 58 passed, 0 failed
 Xinsta Core artifact verified: unsigned arm64 iOS 16.3 Mach-O dylib
 ```
+
+These counts are from the earlier core milestone. Phase 3 verification is
+recorded separately below.
 
 The simulator step in the same run created
 `com.apple.CoreSimulator.SimDeviceType.iPhone-16` on
@@ -140,6 +153,46 @@ add an `LC_RPATH` to the host executable that resolves to that directory, or
 load by an explicit resolved path. `otool -L` validation currently checks the
 expected install name only; no loader/rpath behaviour is claimed here.
 
+## Phase 3: static-evidence-driven hardening
+
+This increment responds to the DLInsta/target static evidence without turning
+any static observation into a runtime claim.
+
+- **Version-specific capability gate**: `XinstaCompatibility` now exposes the
+  single target class (`IGProfileSheetTableViewController`) and the three
+  table-view selectors required by the 456.0.0 / build 1114925422 adapter. A
+  missing target class produces the separate `target_unavailable` code.
+- **Explicit feature-to-adapter binding**: every `XinstaFeature` declares an
+  `adapterIdentifier`; `XinstaFeatureRegistry` filters to one binding and
+  refuses writes for unbound identifiers. No feature is implicitly available.
+- **Fail-closed missing target**: `XinstaIG456Adapter.targetRuntimeVerified`
+  becomes YES only from the same accepted evaluation that observed the target
+  class. Presentation refuses to run when it is NO.
+- **Initialization diagnostic**: the load path emits one fixed-code line with
+  status, bound-feature count, and acceptance. It never logs host-controlled
+  metadata, preference values, paths, or exception text. The diagnostic itself
+  is wrapped so an unexpected exception maps to `invalid_input`.
+- **Safe presentation mechanism**: `XinstaSettingsPresenter` is the only
+  presentation entry point. It requires main-thread use, an accepted adapter,
+  a verified target runtime, a matching binding, and at least one bound
+  feature. It does not discover, swizzle, or modify an Instagram view
+  controller; a future integration must explicitly supply a validated host
+  `UIViewController`.
+- **Fresh state reads**: settings cells and the status footer re-read the
+  registry and adapter on appearance and after toggles; no feature state is
+  cached in the controller.
+
+Phase 3 does **not** add a hook, an injection path, the owner's future feature
+catalog, or a claim that X Settings was shown in Instagram.
+
+### Phase 3 verification
+
+Status: **pending CI on the exact development head**. The local Windows
+workspace can verify static evidence and the Python regression suites but
+cannot compile or run the iOS Foundation/simulator tests. The macOS workflow
+must report clean dylib compilation, Foundation assertions, simulator XCTests,
+and artifact validation before this section is updated with exact run IDs.
+
 ## Model 1 review closure
 
 | Finding | Status | Evidence |
@@ -162,8 +215,8 @@ expected install name only; no loader/rpath behaviour is claimed here.
 ## Verified vs unverified
 
 - Verified: read-only symbol and bundle presence in the exact reference IPA;
-  unsigned dylib compilation; 58 Foundation assertions; iOS Simulator UIKit
-  XCTests; fail-closed artifact structure.
+  unsigned dylib compilation; the Foundation and simulator assertions reported
+  in the recorded CI runs; fail-closed artifact structure.
 - Unverified and explicitly out of scope here: runtime swizzling, injection
   into a running Instagram process, presentation of X Settings from Instagram
   UI, code signing, device installation, and iPhone 13 behaviour.

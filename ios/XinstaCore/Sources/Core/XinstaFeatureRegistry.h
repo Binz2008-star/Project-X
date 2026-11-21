@@ -3,15 +3,18 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
-/// Stores only explicit user overrides. Defaults are evaluated from the
-/// registry at read time, so a newly registered default-enabled feature works
-/// without clearing preferences from an earlier build.
+/// Stores only explicit user overrides for features bound to one adapter.
+/// Defaults are evaluated from the registry at read time, so every state read
+/// is fresh and a newly registered default-enabled feature works without
+/// clearing preferences from an earlier build.
 @interface XinstaFeatureRegistry : NSObject
 
+@property (nonatomic, copy, readonly) NSString *adapterIdentifier;
 @property (nonatomic, copy, readonly) NSArray<XinstaFeature *> *features;
 
 - (instancetype)initWithFeatures:(NSArray<XinstaFeature *> *)features
-                     userDefaults:(NSUserDefaults *)userDefaults NS_DESIGNATED_INITIALIZER;
+                      userDefaults:(NSUserDefaults *)userDefaults
+                 adapterIdentifier:(NSString *)adapterIdentifier NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
 + (instancetype)sharedRegistry;

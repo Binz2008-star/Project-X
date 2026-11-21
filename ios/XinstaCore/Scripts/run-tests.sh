@@ -25,6 +25,7 @@ CLANG="$(xcrun --sdk macosx -f clang)"
   "$ROOT/Sources/Core/XinstaHostMetadata.m" \
   "$ROOT/Sources/Core/XinstaSettingsDataSource.m" \
   "$ROOT/Sources/Adapter/XinstaIG456Adapter.m" \
+  "$ROOT/Sources/Adapter/XinstaDiagnostic.m" \
   -framework Foundation
 
 "$OUT/xinsta-core-tests"

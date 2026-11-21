@@ -4,6 +4,7 @@
 @property (nonatomic, strong) XinstaSettingsDataSource *dataSource;
 @property (nonatomic, strong) XinstaIG456Adapter *adapter;
 @property (nonatomic, strong) UILabel *statusLabel;
+- (void)refreshStatus;
 @end
 
 @implementation XinstaSettingsViewController
@@ -70,6 +71,21 @@ static NSString *const XinstaSettingsCellIdentifier = @"XinstaSettingsCell";
     footer.frame = CGRectMake(0.0, 0.0, width, ceil(fitted.height) + 16.0);
     self.tableView.tableFooterView = footer;
     self.statusLabel = label;
+    [self refreshStatus];
+}
+
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self refreshStatus];
+}
+
+/// Reads adapter status and toggle states again from their owners instead of
+/// keeping a cached snapshot in the controller.
+- (void)refreshStatus {
+    if (self.statusLabel) {
+        self.statusLabel.text = [self.dataSource statusTextForReport:self.adapter.compatibilityReport];
+    }
+    [self.tableView reloadData];
 }
 
 #pragma mark - UITableViewDataSource
@@ -113,6 +129,7 @@ static NSString *const XinstaSettingsCellIdentifier = @"XinstaSettingsCell";
 
 - (void)toggleChanged:(UISwitch *)sender {
     [self.dataSource setEnabled:sender.on atIndex:(NSUInteger)sender.tag];
+    [self.tableView reloadData];
 }
 
 @end

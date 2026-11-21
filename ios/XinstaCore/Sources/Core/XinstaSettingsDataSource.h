@@ -12,12 +12,18 @@ NS_ASSUME_NONNULL_BEGIN
 - (instancetype)initWithRegistry:(XinstaFeatureRegistry *)registry NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
+@property (nonatomic, copy, readonly) NSString *adapterIdentifier;
 @property (nonatomic, copy, readonly) NSArray<XinstaFeature *> *features;
 
 - (NSUInteger)numberOfRows;
 - (nullable XinstaFeature *)featureAtIndex:(NSUInteger)index;
 - (BOOL)isEnabledAtIndex:(NSUInteger)index;
 - (void)setEnabled:(BOOL)enabled atIndex:(NSUInteger)index;
+
+/// Returns a fresh snapshot from the registry. No toggle state is cached in
+/// the data source or the settings controller.
+- (NSDictionary<NSString *, NSNumber *> *)currentFeatureStates;
+
 - (NSString *)statusTextForReport:(nullable XinstaCompatibilityReport *)report;
 
 @end

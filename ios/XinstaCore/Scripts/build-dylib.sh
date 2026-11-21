@@ -21,7 +21,9 @@ SOURCES=(
   "$ROOT/Sources/Core/XinstaHostMetadata.m"
   "$ROOT/Sources/Core/XinstaSettingsDataSource.m"
   "$ROOT/Sources/Adapter/XinstaIG456Adapter.m"
+  "$ROOT/Sources/Adapter/XinstaDiagnostic.m"
   "$ROOT/Sources/UI/XinstaSettingsViewController.m"
+  "$ROOT/Sources/UI/XinstaSettingsPresenter.m"
 )
 
 "$CLANG" \

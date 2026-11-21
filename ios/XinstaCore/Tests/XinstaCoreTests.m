@@ -7,6 +7,7 @@
 #import "XinstaHostMetadata.h"
 #import "XinstaSettingsDataSource.h"
 #import "XinstaIG456Adapter.h"
+#import "XinstaDiagnostic.h"
 #import "XinstaCore.h"
 
 static NSUInteger gPassed = 0;
@@ -35,24 +36,28 @@ static void RemoveTestDefaults(void) {
     }
 }
 
+static XinstaFeature *Feature(NSString *identifier, NSString *title, BOOL enabled) {
+    return [[XinstaFeature alloc] initWithIdentifier:identifier
+                                               title:title
+                                         description:title
+                                    enabledByDefault:enabled
+                                   adapterIdentifier:XinstaAdapterIdentifierIG456];
+}
+
 static XinstaFeatureRegistry *TestRegistry(NSUserDefaults *defaults) {
     NSArray *features = @[
-        [[XinstaFeature alloc] initWithIdentifier:@"info"
-                                            title:@"Build Information"
-                                      description:@"Info"
-                                 enabledByDefault:YES],
-        [[XinstaFeature alloc] initWithIdentifier:@"demo.toggle"
-                                            title:@"Demo Option"
-                                      description:@"Demo"
-                                 enabledByDefault:NO],
+        Feature(@"info", @"Build Information", YES),
+        Feature(@"demo.toggle", @"Demo Option", NO),
     ];
-    return [[XinstaFeatureRegistry alloc] initWithFeatures:features userDefaults:defaults];
+    return [[XinstaFeatureRegistry alloc] initWithFeatures:features
+                                               userDefaults:defaults
+                                          adapterIdentifier:XinstaAdapterIdentifierIG456];
 }
 
 static XinstaHostMetadata *Metadata(NSString *bundleID, NSString *version, NSString *build) {
     return [[XinstaHostMetadata alloc] initWithBundleIdentifier:bundleID
-                                                       version:version
-                                                         build:build];
+                                                        version:version
+                                                          build:build];
 }
 
 static XinstaHostMetadata *ValidMetadata(void) {
@@ -68,7 +73,11 @@ static XinstaSymbolAvailability AllSymbols(void) {
 static void TestFeatureRegistration(void) {
     NSUserDefaults *defaults = CleanDefaults();
     XinstaFeatureRegistry *registry = TestRegistry(defaults);
-    Expect(registry.features.count == 2, @"registry exposes both features");
+    Expect(registry.features.count == 2, @"registry exposes both bound features");
+    Expect([registry.adapterIdentifier isEqualToString:XinstaAdapterIdentifierIG456],
+           @"registry records its adapter binding");
+    Expect([registry.features.firstObject.adapterIdentifier isEqualToString:XinstaAdapterIdentifierIG456],
+           @"feature carries the explicit adapter binding");
     Expect([registry isEnabledForIdentifier:@"info"], @"default-enabled feature is on");
     Expect(![registry isEnabledForIdentifier:@"demo.toggle"], @"default-disabled feature is off");
 
@@ -77,7 +86,26 @@ static void TestFeatureRegistration(void) {
 
     XinstaFeatureRegistry *reloaded = TestRegistry(defaults);
     Expect([reloaded isEnabledForIdentifier:@"demo.toggle"], @"override survives a registry rebuild");
-    Expect(reloaded.effectiveStates.count == 2, @"effective states cover all features");
+    Expect(reloaded.effectiveStates.count == 2, @"effective states cover all bound features");
+}
+
+static void TestAdapterBindingFilter(void) {
+    NSUserDefaults *defaults = CleanDefaults();
+    XinstaFeature *bound = Feature(@"info", @"Build Information", YES);
+    XinstaFeature *unbound = [[XinstaFeature alloc] initWithIdentifier:@"other"
+                                                                 title:@"Other"
+                                                           description:@"Other"
+                                                      enabledByDefault:YES
+                                                     adapterIdentifier:@"com.example.other"];
+    XinstaFeatureRegistry *registry = [[XinstaFeatureRegistry alloc]
+        initWithFeatures:@[bound, unbound]
+             userDefaults:defaults
+        adapterIdentifier:XinstaAdapterIdentifierIG456];
+    Expect(registry.features.count == 1, @"features bound to another adapter are excluded");
+    Expect(![registry isEnabledForIdentifier:@"other"], @"unbound feature state is unavailable");
+    [registry setEnabled:YES forIdentifier:@"other"];
+    Expect([defaults objectForKey:@"xinsta.core.featureOverrides"] == nil,
+           @"unbound feature cannot write an override");
 }
 
 static void TestPersistenceHardening(void) {
@@ -100,18 +128,13 @@ static void TestPersistenceHardening(void) {
     Expect([defaults dictionaryForKey:@"xinsta.core.featureOverrides"].count == 1,
            @"unknown feature identifier is rejected");
 
-    XinstaFeature *duplicate = [[XinstaFeature alloc] initWithIdentifier:@"info"
-                                                                   title:@"Duplicate"
-                                                             description:@"Duplicate"
-                                                        enabledByDefault:NO];
-    XinstaFeature *primary = [[XinstaFeature alloc] initWithIdentifier:@"info"
-                                                                 title:@"Info"
-                                                           description:@"Info"
-                                                      enabledByDefault:YES];
-    NSArray *withDuplicate = @[primary, duplicate];
+    XinstaFeature *duplicate = Feature(@"info", @"Duplicate", NO);
+    XinstaFeature *primary = Feature(@"info", @"Info", YES);
     NSUserDefaults *duplicateDefaults = CleanDefaults();
-    XinstaFeatureRegistry *duplicateRegistry = [[XinstaFeatureRegistry alloc] initWithFeatures:withDuplicate
-                                                                                  userDefaults:duplicateDefaults];
+    XinstaFeatureRegistry *duplicateRegistry = [[XinstaFeatureRegistry alloc]
+        initWithFeatures:@[primary, duplicate]
+             userDefaults:duplicateDefaults
+        adapterIdentifier:XinstaAdapterIdentifierIG456];
     Expect(duplicateRegistry.effectiveStates.count == 1, @"duplicate feature identifiers collapse to one state");
 }
 
@@ -123,6 +146,9 @@ static void TestSettingsBehaviour(void) {
     Expect([[source featureAtIndex:0].identifier isEqualToString:@"info"], @"row maps to feature");
     Expect([source featureAtIndex:99] == nil, @"out-of-range feature is nil");
     Expect([source isEnabledAtIndex:0], @"row reports default state");
+    Expect([source.adapterIdentifier isEqualToString:XinstaAdapterIdentifierIG456],
+           @"data source exposes the adapter binding");
+    Expect(source.currentFeatureStates.count == 2, @"fresh feature states are available");
 
     [source setEnabled:YES atIndex:1];
     Expect([source isEnabledAtIndex:1], @"toggle updates state");
@@ -130,19 +156,29 @@ static void TestSettingsBehaviour(void) {
     [source setEnabled:YES atIndex:99];
     Expect(source.numberOfRows == 2, @"out-of-range write is a no-op");
 
+    [defaults setObject:@{ @"demo.toggle": @NO } forKey:@"xinsta.core.featureOverrides"];
+    Expect(![source isEnabledAtIndex:1], @"feature state is read freshly from storage");
+
     XinstaCompatibilityReport *report = [[XinstaCompatibilityReport alloc] initWithSupported:NO
-                                                                                  reasonCode:@"blocked"
-                                                                                      reason:@"Blocked"
-                                                                             missingSymbols:@[]];
+                                                                                   reasonCode:@"blocked"
+                                                                                       reason:@"Blocked"
+                                                                              missingSymbols:@[]];
     Expect([[source statusTextForReport:report] containsString:@"Inactive"], @"status reflects blocked adapter");
     Expect([[source statusTextForReport:nil] containsString:@"unavailable"], @"nil report is handled");
 }
 
 static void TestCompatibility(void) {
+    Expect([[XinstaCompatibility adapterIdentifier] isEqualToString:XinstaAdapterIdentifierIG456],
+           @"adapter identifier is stable");
+    Expect([[XinstaCompatibility targetClassName] isEqualToString:@"IGProfileSheetTableViewController"],
+           @"target class is version-specific");
+    Expect([XinstaCompatibility requiredSymbols].count == 4,
+           @"required symbols include the target class and three selectors");
+
     XinstaCompatibilityReport *ok = [XinstaCompatibility checkBundleIdentifier:@"com.burbn.instagram"
-                                                                       version:@"456.0.0"
-                                                                         build:@"1114925422"
-                                                             symbolAvailability:AllSymbols()];
+                                                                        version:@"456.0.0"
+                                                                          build:@"1114925422"
+                                                              symbolAvailability:AllSymbols()];
     Expect(ok.supported, @"exact host identity and symbols are supported");
     Expect([ok.reasonCode isEqualToString:XinstaCompatibilityReasonAccepted], @"accepted reason code is stable");
 
@@ -177,27 +213,31 @@ static void TestCompatibility(void) {
     }
 
     XinstaCompatibilityReport *nilResolver = [XinstaCompatibility checkBundleIdentifier:@"com.burbn.instagram"
-                                                                                version:@"456.0.0"
-                                                                                  build:@"1114925422"
-                                                                      symbolAvailability:nil];
+                                                                                 version:@"456.0.0"
+                                                                                   build:@"1114925422"
+                                                                       symbolAvailability:nil];
     Expect(!nilResolver.supported, @"nil symbol resolver fails closed");
     Expect(nilResolver.missingSymbols.count == 4, @"nil resolver reports every required symbol");
+    Expect([nilResolver.reasonCode isEqualToString:XinstaCompatibilityReasonTargetUnavailable],
+           @"missing target class has its own stable code");
 
     XinstaCompatibilityReport *missingClass = [XinstaCompatibility checkBundleIdentifier:@"com.burbn.instagram"
-                                                                                  version:@"456.0.0"
-                                                                                    build:@"1114925422"
-                                                                        symbolAvailability:^BOOL(NSString *name) {
-                                                                            return ![name isEqualToString:@"IGProfileSheetTableViewController"];
-                                                                        }];
+                                                                                   version:@"456.0.0"
+                                                                                     build:@"1114925422"
+                                                                         symbolAvailability:^BOOL(NSString *name) {
+                                                                             return ![name isEqualToString:@"IGProfileSheetTableViewController"];
+                                                                         }];
     Expect(!missingClass.supported, @"missing class is rejected");
     Expect(missingClass.missingSymbols.count == 1, @"missing class is listed once");
+    Expect([missingClass.reasonCode isEqualToString:XinstaCompatibilityReasonTargetUnavailable],
+           @"missing class reason code is stable");
 
     XinstaCompatibilityReport *missingSelector = [XinstaCompatibility checkBundleIdentifier:@"com.burbn.instagram"
-                                                                                     version:@"456.0.0"
-                                                                                       build:@"1114925422"
-                                                                           symbolAvailability:^BOOL(NSString *name) {
-                                                                               return ![name isEqualToString:@"tableView:didSelectRowAtIndexPath:"];
-                                                                           }];
+                                                                                      version:@"456.0.0"
+                                                                                        build:@"1114925422"
+                                                                            symbolAvailability:^BOOL(NSString *name) {
+                                                                                return ![name isEqualToString:@"tableView:didSelectRowAtIndexPath:"];
+                                                                            }];
     Expect(!missingSelector.supported, @"missing selector is rejected");
     Expect([missingSelector.reasonCode isEqualToString:XinstaCompatibilityReasonSymbolsUnavailable],
            @"symbol failure reason code is stable");
@@ -210,26 +250,31 @@ static void TestAdapter(void) {
         return name.length > 0;
     };
     XinstaIG456Adapter *accepted = [[XinstaIG456Adapter alloc] initWithHostMetadata:ValidMetadata()
-                                                                symbolAvailability:counted];
+                                                                 symbolAvailability:counted];
     Expect(!accepted.compatibilityAccepted, @"adapter begins unaccepted");
+    Expect(!accepted.targetRuntimeVerified, @"adapter begins without a verified target");
+    Expect([[XinstaIG456Adapter adapterIdentifier] isEqualToString:XinstaAdapterIdentifierIG456],
+           @"adapter identifier matches the feature binding");
     Expect([accepted evaluateCompatibility], @"injected exact metadata is accepted");
     Expect(accepted.compatibilityAccepted, @"accepted state is exposed");
+    Expect(accepted.targetRuntimeVerified, @"accepted evaluation verified the target class");
     NSUInteger callsAfterFirst = calls;
     Expect([accepted evaluateCompatibility], @"second evaluation is idempotent");
     Expect(calls == callsAfterFirst, @"idempotent evaluation does not rerun resolver");
     Expect(accepted.compatibilityReport == accepted.compatibilityReport, @"report getter is stable");
 
     XinstaIG456Adapter *wrongBundle = [[XinstaIG456Adapter alloc] initWithHostMetadata:Metadata(@"com.example.other", @"456.0.0", @"1114925422")
-                                                                    symbolAvailability:AllSymbols()];
+                                                                     symbolAvailability:AllSymbols()];
     Expect(![wrongBundle evaluateCompatibility], @"wrong bundle is rejected before symbols");
+    Expect(!wrongBundle.targetRuntimeVerified, @"wrong bundle never verifies a target");
     Expect([wrongBundle.compatibilityReport.reasonCode isEqualToString:XinstaCompatibilityReasonBundleIdentifierMismatch],
            @"wrong bundle reason code is reported");
 
     XinstaIG456Adapter *wrongVersion = [[XinstaIG456Adapter alloc] initWithHostMetadata:Metadata(@"com.burbn.instagram", @"1.0", @"1114925422")
-                                                                    symbolAvailability:AllSymbols()];
+                                                                     symbolAvailability:AllSymbols()];
     Expect(![wrongVersion evaluateCompatibility], @"wrong version is rejected");
     XinstaIG456Adapter *wrongBuild = [[XinstaIG456Adapter alloc] initWithHostMetadata:Metadata(@"com.burbn.instagram", @"456.0.0", @"0")
-                                                                  symbolAvailability:AllSymbols()];
+                                                                   symbolAvailability:AllSymbols()];
     Expect(![wrongBuild evaluateCompatibility], @"wrong build is rejected");
 
     __block NSUInteger failedCalls = 0;
@@ -239,9 +284,10 @@ static void TestAdapter(void) {
         return NO;
     };
     XinstaIG456Adapter *retried = [[XinstaIG456Adapter alloc] initWithHostMetadata:ValidMetadata()
-                                                               symbolAvailability:onceFailing];
+                                                                symbolAvailability:onceFailing];
     Expect(![retried evaluateCompatibility], @"failed evaluation is rejected");
     Expect(![retried evaluateCompatibility], @"retry after failure remains rejected");
+    Expect(!retried.targetRuntimeVerified, @"failed resolver never verifies a target");
     Expect(failedCalls > 0, @"failed resolver was invoked");
 }
 
@@ -258,6 +304,38 @@ static void TestRuntimeSymbolLookup(void) {
            @"empty symbol name fails closed");
 }
 
+static void TestInitializationDiagnostic(void) {
+    Expect([XinstaDiagnostic statusForAdapter:nil registry:nil] == XinstaInitializationStatusInvalidInput,
+           @"nil inputs produce the fixed invalid-input status");
+    Expect([[XinstaDiagnostic codeForStatus:XinstaInitializationStatusInvalidInput] isEqualToString:@"invalid_input"],
+           @"invalid-input code is stable");
+
+    NSUserDefaults *defaults = CleanDefaults();
+    XinstaFeatureRegistry *registry = TestRegistry(defaults);
+    XinstaIG456Adapter *unaccepted = [[XinstaIG456Adapter alloc] initWithHostMetadata:ValidMetadata()
+                                                                   symbolAvailability:AllSymbols()];
+    Expect([XinstaDiagnostic statusForAdapter:unaccepted registry:registry] == XinstaInitializationStatusAdapterNotAccepted,
+           @"unaccepted adapter blocks initialization");
+
+    [unaccepted evaluateCompatibility];
+    Expect([XinstaDiagnostic statusForAdapter:unaccepted registry:registry] == XinstaInitializationStatusReady,
+           @"accepted adapter with bound features is ready");
+
+    XinstaFeatureRegistry *wrongBinding = [[XinstaFeatureRegistry alloc]
+        initWithFeatures:@[Feature(@"info", @"Build Information", YES)]
+             userDefaults:CleanDefaults()
+        adapterIdentifier:@"com.example.other"];
+    Expect([XinstaDiagnostic statusForAdapter:unaccepted registry:wrongBinding] == XinstaInitializationStatusBindingMismatch,
+           @"adapter/feature binding mismatch is detected");
+
+    XinstaFeatureRegistry *empty = [[XinstaFeatureRegistry alloc]
+        initWithFeatures:@[]
+             userDefaults:CleanDefaults()
+        adapterIdentifier:XinstaAdapterIdentifierIG456];
+    Expect([XinstaDiagnostic statusForAdapter:unaccepted registry:empty] == XinstaInitializationStatusNoBoundFeatures,
+           @"no bound features blocks initialization");
+}
+
 static void TestLoadEntryPoint(void) {
     [XinstaCore evaluateAtLoad];
     XinstaCompatibilityReport *report = [XinstaIG456Adapter sharedAdapter].compatibilityReport;
@@ -269,11 +347,13 @@ int main(void) {
     @autoreleasepool {
         gSuiteNames = [NSMutableArray array];
         TestFeatureRegistration();
+        TestAdapterBindingFilter();
         TestPersistenceHardening();
         TestSettingsBehaviour();
         TestCompatibility();
         TestAdapter();
         TestRuntimeSymbolLookup();
+        TestInitializationDiagnostic();
         TestLoadEntryPoint();
         RemoveTestDefaults();
         printf("XinstaCore tests: %lu passed, %lu failed\n",
