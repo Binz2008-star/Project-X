@@ -234,33 +234,46 @@ not merge authorization.
 | L-3 UI layout/cells | FIXED | footer uses Auto Layout + `sizeThatFits:`; switches are reused per cell |
 | L-4 stable log codes | FIXED | constructor logs `reasonCode`, not host-controlled strings |
 
+## Owner-authorized load-only proof
+
+The owner scoped a private runtime test to collect one narrow signal: the
+`[XinstaCore] init=` constructor marker emitted from the Instagram process
+after the unsigned dylib is load-command-inserted into a disposable copy of the
+exact `456.0.0` / `1114925422` artifact. The approved environment is a local
+macOS host with the registered iPhone 13 attached and secure signing inputs.
+`docs/IG456_LOAD_PROOF_RUNBOOK.md` records the pinned identity, evidence
+requirements, and redaction rules. Status on this head: `NOT TESTED`.
+
+This scope does not authorize a hook, swizzle, feature exercise, X Settings
+presentation inside Instagram, account login, redistribution, merge, or any
+repository-side execution. The Build Manager exception is a dry-run planning
+allowlist only; `execution_permitted` remains `false`.
+
 ## Verified vs unverified
 
 - Verified: read-only symbol and bundle presence in the exact reference IPA;
   unsigned dylib compilation; the Foundation and simulator assertions reported
   in the recorded CI runs; fail-closed artifact structure.
-- Unverified and explicitly out of scope here: runtime swizzling, injection
-  into a running Instagram process, presentation of X Settings from Instagram
-  UI, code signing, device installation, and iPhone 13 behaviour.
+- Verified only after the private runbook is executed and independently
+  reviewed: dylib load in the Instagram process. No such evidence exists on
+  this head.
+- Unverified and out of scope here: runtime swizzling, hooking, presentation of
+  X Settings from Instagram UI, feature behavior, account use, and commercial
+  redistribution.
 
 ## Exact remaining steps before any iPhone 13 testing
 
-1. Obtain written owner authorisation for device testing and for the specific
-   enhanced features permitted for this owned app.
-2. Complete Model 1 re-review of this core.
-3. Add one verified hook in the adapter, with a narrow method replacement on a
-   confirmed method, and prove it against a locally installed, owner-owned copy
-   of Instagram 456.0.0 — never against a store account.
-4. Select an implantation/injection method that does not jailbreak the device
-   and is permitted by applicable terms for the owned application.
-5. Prepare a private signing identity, matching provisioning profile, and the
-   iPhone 13 UDID registered in that team. Keep all of these out of GitHub;
-   use secret injection only.
-6. Repackage a **copy** of the IPA with the dylib inserted, resolve `@rpath`,
-   re-sign the bundle and all frameworks, then install with a personal-device
-   tool using the owner's Apple ID.
-7. Run the on-device checklist: app launches, original settings unchanged,
-   X Settings opens, demo toggle persists, adapter status matches the build,
-   no crashes — then capture crash logs and screenshots for review.
+1. Retain the owner's scoped load-only authorization privately; it covers the
+   exact artifact and device for runtime loading only, not commercial rights or
+   feature hooks.
+2. Complete the fresh independent review of this load-only policy change.
+3. Run only the load-only runbook and collect the constructor marker from the
+   Instagram process. Record the exact fixed status; do not treat a non-ready
+   status as a hook or UI success.
+4. Keep all signing material, UDID, IPA copies, raw device logs, and private
+   paths outside GitHub; inject secrets on the macOS host only.
+5. Any future hook, X Settings host proof, or feature exercise requires a new,
+   explicit written scope and a separately reviewed verified target method.
+   Those steps remain `NOT TESTED` here.
 8. Only after all of the above and owner approval may a merge or any wider
    distribution be considered.

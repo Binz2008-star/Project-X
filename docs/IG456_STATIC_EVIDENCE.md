@@ -149,6 +149,9 @@ Phase 3 code therefore keeps compatibility read-only, binds every feature to an
 explicit adapter identifier, blocks presentation when the target or adapter is
 unavailable, and emits only fixed diagnostic codes.
 
-Runtime proof remains `NOT TESTED`; it is blocked pending explicit written
-owner authorization, an authorized app copy, signing identity, provisioning
-profile, registered UDID, approved injection method, and a verified hook path.
+Runtime proof remains `NOT TESTED`. The owner has scoped a narrow load-only
+test for this exact artifact hash on an authorized iPhone 13, using a local
+macOS host, secure signing inputs, and a dylib load-command insert. No runtime
+evidence has been collected in this repository. See
+`docs/IG456_LOAD_PROOF_RUNBOOK.md`; no hook path or X Settings host proof is
+authorized by that scope.

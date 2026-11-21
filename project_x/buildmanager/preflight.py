@@ -29,11 +29,21 @@ CORE_INSTALL_NAME = "@rpath/libXinstaCore.dylib"
 MINIMUM_IOS = (16, 3)
 MINIMUM_IOS_TEXT = "16.3"
 
-# This milestone only accepts an explicitly owned test package. Third-party
-# application rights are not established (see docs/RIGHTS_REGISTER.md), so no
-# third-party bundle identifier can pass this gate regardless of manifest text.
+# This milestone accepts an explicitly owned test package, plus one narrowly
+# pinned load-only proof identity authorised by the owner for this exact
+# artifact. Third-party application rights are not established for commercial
+# use (see docs/RIGHTS_REGISTER.md); the exception below is a dry-run planning
+# allowance only. It does not permit a hook, signing, installation, device
+# action, merge, or execution by this tool.
+OWNED_TEST_RIGHTS_BASIS = "owned-test-package"
+LOAD_ONLY_PROOF_RIGHTS_BASIS = "load-only-proof"
+LOAD_ONLY_PROOF_IDENTITY = ("com.burbn.instagram", "456.0.0", "1114925422")
+LOAD_ONLY_PROOF_SHA256 = (
+    "665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131"
+)
+LOAD_ONLY_PROOF_ADAPTER = "com.burbn.instagram@456.0.0@1114925422"
 ALLOWED_BUNDLE_IDS = frozenset({"demo.owned"})
-ALLOWED_RIGHTS_BASIS = frozenset({"owned-test-package"})
+ALLOWED_RIGHTS_BASIS = frozenset({OWNED_TEST_RIGHTS_BASIS, LOAD_ONLY_PROOF_RIGHTS_BASIS})
 ALLOWED_ARCHITECTURES = frozenset({"arm64", "arm64e"})
 
 # Bounded, output-safe identity text. Rejections are reported with fixed codes
@@ -298,13 +308,43 @@ def evaluate(manifest: Any, report: Any) -> PreflightResult:
     findings: list[Finding] = []
     identity = report["identity"]
     artifact = report["artifact"]
+    load_only_proof = (
+        auth.bundle_id,
+        auth.version,
+        auth.build_number,
+    ) == LOAD_ONLY_PROOF_IDENTITY
 
-    if auth.bundle_id not in ALLOWED_BUNDLE_IDS:
+    if auth.bundle_id not in ALLOWED_BUNDLE_IDS and not load_only_proof:
         findings.append(
             Finding(
                 "BUNDLE_ID_NOT_ALLOWED",
                 _BLK,
-                "only explicitly owned test packages are eligible in this milestone",
+                "only explicitly owned test packages and the pinned load proof are eligible",
+            )
+        )
+    if load_only_proof:
+        if auth.rights_basis != LOAD_ONLY_PROOF_RIGHTS_BASIS:
+            findings.append(
+                Finding(
+                    "RIGHTS_BASIS_NOT_ALLOWED_FOR_LOAD_PROOF",
+                    _BLK,
+                    "the pinned proof requires the load-only rights basis",
+                )
+            )
+        if auth.expected_sha256 != LOAD_ONLY_PROOF_SHA256:
+            findings.append(
+                Finding(
+                    "SHA256_NOT_PINNED_FOR_LOAD_PROOF",
+                    _BLK,
+                    "the pinned proof requires its recorded artifact hash",
+                )
+            )
+    elif auth.rights_basis != OWNED_TEST_RIGHTS_BASIS:
+        findings.append(
+            Finding(
+                "RIGHTS_BASIS_NOT_ALLOWED_FOR_OWNED_TEST",
+                _BLK,
+                "owned test packages require the owned-test rights basis",
             )
         )
     if identity["bundle_id"] != auth.bundle_id:
@@ -397,7 +437,7 @@ def evaluate(manifest: Any, report: Any) -> PreflightResult:
             "read-only preflight passed; execution remains prohibited in this plan",
         )
     )
-    plan = _build_plan(auth, identity, artifact, warning_codes)
+    plan = _build_plan(auth, identity, artifact, warning_codes, load_only_proof)
     return PreflightResult(True, tuple(findings), plan)
 
 
@@ -579,13 +619,83 @@ def _build_plan(
     identity: dict,
     artifact: dict,
     warning_codes: list[str],
+    load_only_proof: bool,
 ) -> dict:
     """Produce a deterministic plan; no step in it is executable by this tool."""
+    steps = [
+        {
+            "id": "verify_report_schema",
+            "status": "passed",
+            "action": "validated the versioned read-only inspection report",
+        },
+        {
+            "id": "check_owner_declaration",
+            "status": "passed",
+            "action": (
+                "matched the unsigned owner declaration to the inspected package "
+                "and hash; this is not proof of authorization"
+            ),
+        },
+        {
+            "id": "stage_core_dylib",
+            "status": "planned",
+            "action": "would place the validated dylib in a Frameworks directory",
+            "requires": ["separate_installer_review"],
+        },
+        {
+            "id": "resolve_loader_rpath",
+            "status": "planned",
+            "action": "would add a host LC_RPATH or load by explicit path",
+            "requires": ["separate_installer_review"],
+        },
+        {
+            "id": "codesign_bundle_and_frameworks",
+            "status": "blocked",
+            "action": "would re-sign the bundle and all nested frameworks",
+            "requires": ["signing_identity", "provisioning_profile"],
+        },
+        {
+            "id": "register_device_and_install",
+            "status": "blocked",
+            "action": "would register a device and install the private build",
+            "requires": ["registered_udid", "owner_device_authorization"],
+        },
+        {
+            "id": "verify_x_settings_in_host",
+            "status": "blocked",
+            "action": "would verify X Settings inside the target application",
+            "requires": ["approved_hook_path", "physical_device_qa"],
+        },
+    ]
+    if load_only_proof:
+        steps.append(
+            {
+                "id": "verify_core_load_in_host",
+                "status": "blocked",
+                "action": "would collect the fixed constructor load marker on the authorized device",
+                "requires": ["owner_runtime_scope", "authorized_device", "secure_signing_inputs"],
+            }
+        )
+
+    limitations = [
+        "no IPA is opened, extracted, modified, signed, or installed by this tool",
+        "no hook, swizzle, injection method, or host executable change is validated",
+        "static inspection is not a malware verdict or a signature verification",
+        "the unsigned owner declaration is advisory only, not proof of authorization",
+        "execution requires a separate, cryptographically verified permit outside this plan",
+    ]
+    if load_only_proof:
+        limitations.append(
+            "the pinned load-only proof permits no hook, host UI test, signing, "
+            "installation, or device action by this tool"
+        )
+
     return {
         "plan_version": PLAN_SCHEMA_VERSION,
         "mode": "dry_run",
         "execution_permitted": False,
         "status": "READY_FOR_INDEPENDENT_REVIEW",
+        "purpose": "load_only_proof" if load_only_proof else "owned_test_package",
         "authorization": {
             "authorization_id": auth.authorization_id,
             "rights_basis": auth.rights_basis,
@@ -601,55 +711,15 @@ def _build_plan(
         "xinsta_core": {
             "install_name": CORE_INSTALL_NAME,
             "load_entry": "XinstaCoreLoad",
-            "compatibility_adapter": "not_applicable_to_owned_test_package",
+            "compatibility_adapter": (
+                LOAD_ONLY_PROOF_ADAPTER
+                if load_only_proof
+                else "not_applicable_to_owned_test_package"
+            ),
             "hook": False,
             "swizzle": False,
         },
-        "steps": [
-            {
-                "id": "verify_report_schema",
-                "status": "passed",
-                "action": "validated the versioned read-only inspection report",
-            },
-            {
-                "id": "check_owner_declaration",
-                "status": "passed",
-                "action": (
-                    "matched the unsigned owner declaration to the inspected package "
-                    "and hash; this is not proof of authorization"
-                ),
-            },
-            {
-                "id": "stage_core_dylib",
-                "status": "planned",
-                "action": "would place the validated dylib in a Frameworks directory",
-                "requires": ["separate_installer_review"],
-            },
-            {
-                "id": "resolve_loader_rpath",
-                "status": "planned",
-                "action": "would add a host LC_RPATH or load by explicit path",
-                "requires": ["separate_installer_review"],
-            },
-            {
-                "id": "codesign_bundle_and_frameworks",
-                "status": "blocked",
-                "action": "would re-sign the bundle and all nested frameworks",
-                "requires": ["signing_identity", "provisioning_profile"],
-            },
-            {
-                "id": "register_device_and_install",
-                "status": "blocked",
-                "action": "would register a device and install the private build",
-                "requires": ["registered_udid", "owner_device_authorization"],
-            },
-            {
-                "id": "verify_x_settings_in_host",
-                "status": "blocked",
-                "action": "would verify X Settings inside the target application",
-                "requires": ["approved_hook_path", "physical_device_qa"],
-            },
-        ],
+        "steps": steps,
         "required_credentials": [
             {"name": name, "provided": False, "secret": True}
             for name in (
@@ -659,11 +729,5 @@ def _build_plan(
             )
         ],
         "review_findings": warning_codes,
-        "limitations": [
-            "no IPA is opened, extracted, modified, signed, or installed by this tool",
-            "no hook, swizzle, injection method, or host executable change is validated",
-            "static inspection is not a malware verdict or a signature verification",
-            "the unsigned owner declaration is advisory only, not proof of authorization",
-            "execution requires a separate, cryptographically verified permit outside this plan",
-        ],
+        "limitations": limitations,
     }

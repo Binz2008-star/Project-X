@@ -6,7 +6,7 @@
 |---|---|---|---|---|
 | theoccurrence/Swing | Build orchestrator | No top-level license observed on inspected commit | Not established | Request written commercial terms from maintainer |
 | efibalogh/sparkle-ig | Instagram tweak | GPL-3.0 | Tweak may be commercially used subject to GPL obligations; original app rights missing | Review GPL obligations; obtain separate original-app permission |
-| Instagram iOS | Proprietary original application | Proprietary | Not established | Obtain authorization or switch to owned original |
+| Instagram iOS | Proprietary original application | Proprietary. Owner scoped a private load-only proof for the exact `456.0.0` / `1114925422` artifact hash on an authorized iPhone 13; no commercial or redistribution right was granted | Commercial use still not established; load-only runtime evidence is separate and not yet tested | Retain the scoped authorization privately; keep raw runtime evidence out of GitHub; obtain separate original-app permission before any commercial use or redistribution |
 | YouTube iOS | Proprietary original application | Proprietary | Not established | Obtain authorization or switch to owned original |
 | Snapchat iOS | Proprietary original application | Proprietary | Not established | Obtain authorization or switch to owned original |
 | TikTok iOS | Proprietary original application | Proprietary | Not established | Obtain authorization or switch to owned original |

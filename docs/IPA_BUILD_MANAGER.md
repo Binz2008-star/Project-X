@@ -58,7 +58,9 @@ Every known finding code has an entry in `EXPECTED_SEVERITIES`, including the A7
 | Report shape, unsupported schema, unknown finding code, malformed hash | `REPORT_INVALID` |
 | Unsafe identity-like text (path, control, bidi, secret-like, overlong) | `UNSAFE_IDENTITY_STRING` |
 | Report finding severity disagrees with its known code | `REPORT_INCONSISTENT` |
-| Any bundle other than an owned test package | `BUNDLE_ID_NOT_ALLOWED` |
+| Any bundle other than an owned test package or the pinned load-only proof identity | `BUNDLE_ID_NOT_ALLOWED` |
+| Pinned proof has the wrong rights basis or an unpinned hash | `RIGHTS_BASIS_NOT_ALLOWED_FOR_LOAD_PROOF`, `SHA256_NOT_PINNED_FOR_LOAD_PROOF` |
+| Owned test package declares the load-only rights basis | `RIGHTS_BASIS_NOT_ALLOWED_FOR_OWNED_TEST` |
 | Identity or hash differs from the manifest | `BUNDLE_ID_MISMATCH`, `VERSION_MISMATCH`, `BUILD_MISMATCH`, `SHA256_MISMATCH` |
 | Deployment target below iOS 16.3 | `MINIMUM_OS_TOO_LOW` |
 | Missing/invalid main executable, non-arm64-family, or encrypted slice | `MAIN_EXECUTABLE_*` |
@@ -71,17 +73,18 @@ Warnings and duplicate framework basenames are retained as `review_findings`; on
 
 Architecture acceptance is strict: only `arm64` and `arm64e` slices are valid. The legacy string alias `arm64v8` and CPU subtype `1` are normalised to `arm64`; subtype `2` maps to `arm64e`. A subtype never promotes an explicitly unsupported architecture (`x86_64`, `armv7`, unknown strings, non-strings), and one unsupported slice blocks a mixed-slice report. No IPA bytes are read by preflight; tests build minimal real Mach-O headers locally.
 
-The allowlist currently contains only `demo.owned`, the fictional/owned test product used throughout this repository. Third-party bundle identifiers such as `com.burbn.instagram` are rejected unconditionally: `docs/RIGHTS_REGISTER.md` records that commercial rights are not established, and the owner has not supplied a written authorization artifact to this tool.
+The owned-test allowlist contains only `demo.owned`, the fictional/owned test product used throughout this repository. A separate, narrowly pinned planning exception allows `com.burbn.instagram` version `456.0.0` build `1114925422` only when the manifest declares `load-only-proof` and pins artifact SHA-256 `665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131`. This exception was scoped by the owner for a private load-only device proof; it does not establish commercial rights, permit hooks or host UI verification, or make the plan executable. All other third-party bundle identifiers remain rejected unconditionally. See `docs/IG456_LOAD_PROOF_RUNBOOK.md`.
 
 ## Dry-run plan semantics
 
 A passing result has `preflight_passed = true` and a plan with:
 
 - `mode = "dry_run"`, `execution_permitted = false`, `status = "READY_FOR_INDEPENDENT_REVIEW"`.
+- `purpose = "owned_test_package"` or, for the pinned exception, `purpose = "load_only_proof"`.
 - `authorization.verification = "advisory_declaration_only"` and `authorization.cryptographically_verified = false`. The unsigned declaration is never presented as verified authorization.
 - Exact package identity and SHA-256 copied from the validated inputs only.
-- `@rpath/libXinstaCore.dylib` recorded as the expected install name, with `hook = false` and `swizzle = false`.
-- Ordered steps marked `passed`, `planned`, or `blocked`. The declaration check is `check_owner_declaration` (not a verification step). Staging the dylib and adding a loader rpath are *planned* and require a separate installer review; codesigning, device registration/install, and in-host X Settings verification are *blocked* pending credentials, verified authorization and an approved hook path.
+- `@rpath/libXinstaCore.dylib` recorded as the expected install name, with `hook = false` and `swizzle = false`. The pinned proof uses compatibility adapter `com.burbn.instagram@456.0.0@1114925422`; this is an identifier, not a runtime capability.
+- Ordered steps marked `passed`, `planned`, or `blocked`. The declaration check is `check_owner_declaration` (not a verification step). Staging the dylib and adding a loader rpath are *planned* and require a separate installer review; codesigning, device registration/install, in-host load-marker collection for the pinned proof, and in-host X Settings verification are *blocked* pending credentials, verified authorization and an approved hook path.
 - Credential names listed as `provided = false`, `secret = true`. No credential value, local path, or provisioning-profile metadata appears in the output.
 
 The output is byte-stable for identical inputs: no timestamps, no absolute paths, and no unordered sets in emitted lists.
@@ -112,6 +115,12 @@ Each CLI input is limited to `MAX_INPUT_BYTES = 4 * 1024 * 1024`, `MAX_JSON_DEPT
 Exit codes: `0` preflight passed, `2` preflight rejected, `1` unreadable/oversized input, invalid JSON shape, or invalid arguments — including unknown flags and missing required flags. Argument errors print only `{"error": "invalid_arguments"}`; file/JSON errors print only a fixed error code. No private path, argument text, or decoder detail is echoed. Windows syntax uses `--basetemp` because the default pytest temp root can be ACL-restricted; CI on Linux needs no override.
 
 ## Verification
+
+Load-only policy increment on this development branch: local full pytest suite
+`308 passed, 30 skipped`; targeted preflight/authorization suites `166 passed`;
+legacy licensing `OK (7 tests)`; OpenAPI synchronization passed; `git diff
+--check` clean. This increment is pending fresh CI and independent review; no
+runtime load evidence is claimed.
 
 B9 correction and re-review set: `159 passed` for `tests/test_build_manager_preflight.py` together with `tests/test_build_manager_authorization.py` using the repository virtualenv on 2026-11-21; combined API/staging run `31 passed, 29 skipped`; `git diff --check` clean. CI on the earlier B9 head passed push run `44841872361` and PR run `44841879766`. The later re-review corrections and their final-head CI runs are recorded in the PR body.
 
@@ -167,17 +176,18 @@ The fresh independent review of the B9 head returned `REQUEST CHANGES`. Each fin
 ## Security and compatibility considerations
 
 - Trust boundary: the tool trusts the *structure* of the analyzer report but verifies that the analyzer did not claim signature verification or a malware verdict. A forged report can still misstate facts; the SHA-256 binding to an owner declaration limits casual substitution but is not a cryptographic signature. The unsigned declaration is advisory and is not proof of authorization; `authorization.py` is the separate, fail-closed gate and has no executor.
-- No third-party IPA is inspected, copied, or committed in these tests. Fixtures are hand-built JSON.
+- No third-party IPA is inspected, copied, or committed in these tests. Fixtures are hand-built JSON; the pinned exception stores only identity metadata and a public artifact hash.
 - No signing identity, provisioning profile, UDID, Apple ID, or device is touched.
 - `XinstaCore` remains a standalone, unsigned dylib. This tool does not claim any loader/rpath wiring, injection, or hook.
+- The pinned load-only proof is a planning allowance for a private host runbook. It does not change `execution_permitted`, authorize a hook, prove runtime loading, or permit a merge.
 
 ## Outstanding risks and next milestone
 
 1. Independent review of the earlier increment is complete: first pass `REQUEST CHANGES`, re-review **APPROVE** with no remaining findings. This B9 increment is not yet independently reviewed. Owner approval is still required for any merge or later integration stage; the unsigned declaration is not that approval.
 2. The analyzer and preflight now coexist in the converged read-only tree. Real analyzer output from synthetic owned fixtures is exercised end to end by `tests/test_build_manager_integration.py`; report schemas `1.0` and `1.1` are accepted. See `docs/INTEGRATION_READINESS.md`.
 3. An owner-owned, buildable iOS test application must exist before any real integration rehearsal. The fictional `demo.owned` identity is only a contract fixture.
-4. Signing identity, provisioning profile, registered UDID, and written device-authorization scope remain unavailable — all plan steps that need them stay `blocked`.
-5. No approved injection/implantation method or verified hook path exists; X Settings remains a standalone simulator-tested controller.
-6. Next executable milestone: extend this plan into a *local-only, owned-app* integration rehearsal that produces a reproducible artifact manifest and proves the plan’s stepped preconditions, still without signing or device installation.
+4. Signing identity, provisioning profile, registered UDID, and written device-authorization scope are supplied only on the private macOS host; they are not read or stored by this repository, and all plan steps that need them stay `blocked`.
+5. A load-command insert method is scoped for the pinned proof, but no hook path exists; X Settings remains a standalone simulator-tested controller.
+6. Next executable milestone: run the private load-only proof in `docs/IG456_LOAD_PROOF_RUNBOOK.md`, collect the constructor marker from the target process, and keep raw evidence outside the repository.
 
 No merge, deployment, Neon change, signing, repackaging, or device work is authorized by this increment.

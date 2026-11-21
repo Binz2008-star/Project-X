@@ -35,6 +35,11 @@ MH_EXECUTE = 2
 
 SHA = "a" * 64
 BUNDLE = "demo.owned"
+IG456_BUNDLE = "com.burbn.instagram"
+IG456_VERSION = "456.0.0"
+IG456_BUILD = "1114925422"
+IG456_SHA = "665a814e13d8c187dce5a78d0e8348f73f9081205b927291d7d5d2bce96eb131"
+IG456_ADAPTER = "com.burbn.instagram@456.0.0@1114925422"
 
 
 def authorization_manifest() -> dict:
@@ -127,6 +132,33 @@ def inspection_report() -> dict:
             "malware_verdict": None,
         },
     }
+
+
+def load_only_manifest() -> dict:
+    manifest = authorization_manifest()
+    manifest["authorization_id"] = "AUTH-IG456-LOAD-001"
+    manifest["expected_identity"] = {
+        "bundle_id": IG456_BUNDLE,
+        "version": IG456_VERSION,
+        "build_number": IG456_BUILD,
+    }
+    manifest["expected_sha256"] = IG456_SHA
+    manifest["rights_basis"] = "load-only-proof"
+    return manifest
+
+
+def load_only_report() -> dict:
+    report = inspection_report()
+    report["artifact"]["sha256"] = IG456_SHA
+    report["identity"].update(
+        bundle_id=IG456_BUNDLE,
+        name="Owner Authorized Target",
+        display_name="Owner Authorized Target",
+        version=IG456_VERSION,
+        build_number=IG456_BUILD,
+        executable="Payload/Target.app/Target",
+    )
+    return report
 
 
 def macho_header_bytes(cpu_type: int, cpu_subtype: int, file_type: int = MH_EXECUTE) -> bytes:
@@ -252,6 +284,79 @@ def test_third_party_bundle_is_always_rejected() -> None:
     result = evaluate(manifest, report)
     assert result.preflight_passed is False
     assert "BUNDLE_ID_NOT_ALLOWED" in codes(result)
+
+
+def test_pinned_load_only_proof_produces_dry_run_plan() -> None:
+    result = evaluate(load_only_manifest(), load_only_report())
+    assert result.preflight_passed is True
+    assert result.plan is not None
+    assert result.plan["mode"] == "dry_run"
+    assert result.plan["execution_permitted"] is False
+    assert result.plan["purpose"] == "load_only_proof"
+    assert result.plan["authorization"]["rights_basis"] == "load-only-proof"
+    assert result.plan["xinsta_core"]["compatibility_adapter"] == IG456_ADAPTER
+    assert result.plan["xinsta_core"]["hook"] is False
+    assert result.plan["xinsta_core"]["swizzle"] is False
+
+    blocked = {step["id"] for step in result.plan["steps"] if step["status"] == "blocked"}
+    assert {
+        "codesign_bundle_and_frameworks",
+        "register_device_and_install",
+        "verify_core_load_in_host",
+        "verify_x_settings_in_host",
+    } <= blocked
+    assert any("permits no hook" in item for item in result.plan["limitations"])
+    assert result.plan["package"]["sha256"] == IG456_SHA
+
+
+@pytest.mark.parametrize(
+    ("mutate_manifest", "expected_code"),
+    [
+        (
+            lambda m: m["expected_identity"].update(version="456.0.1"),
+            "BUNDLE_ID_NOT_ALLOWED",
+        ),
+        (
+            lambda m: m["expected_identity"].update(build_number="1114925421"),
+            "BUNDLE_ID_NOT_ALLOWED",
+        ),
+        (
+            lambda m: m.update(rights_basis="owned-test-package"),
+            "RIGHTS_BASIS_NOT_ALLOWED_FOR_LOAD_PROOF",
+        ),
+        (
+            lambda m: m.update(expected_sha256="b" * 64),
+            "SHA256_NOT_PINNED_FOR_LOAD_PROOF",
+        ),
+    ],
+)
+def test_load_only_proof_near_misses_are_rejected(mutate_manifest, expected_code) -> None:
+    manifest = load_only_manifest()
+    mutate_manifest(manifest)
+    result = evaluate(manifest, load_only_report())
+    assert result.preflight_passed is False
+    assert expected_code in codes(result)
+    assert result.plan is None
+
+
+def test_load_only_proof_hash_is_pinned_even_when_report_matches() -> None:
+    manifest = load_only_manifest()
+    report = load_only_report()
+    wrong_hash = "c" * 64
+    manifest["expected_sha256"] = wrong_hash
+    report["artifact"]["sha256"] = wrong_hash
+    result = evaluate(manifest, report)
+    assert result.preflight_passed is False
+    assert "SHA256_NOT_PINNED_FOR_LOAD_PROOF" in codes(result)
+    assert "SHA256_MISMATCH" not in codes(result)
+
+
+def test_owned_test_package_cannot_use_load_only_rights_basis() -> None:
+    manifest = authorization_manifest()
+    manifest["rights_basis"] = "load-only-proof"
+    result = evaluate(manifest, inspection_report())
+    assert result.preflight_passed is False
+    assert "RIGHTS_BASIS_NOT_ALLOWED_FOR_OWNED_TEST" in codes(result)
 
 
 @pytest.mark.parametrize(
