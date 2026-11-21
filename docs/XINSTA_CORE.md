@@ -215,6 +215,21 @@ off-main-thread presentation refusal, and presenter binding mismatch are
 code-inspected rather than directly asserted. This record is review evidence,
 not merge authorization.
 
+### PR #11 status (21 November 2026)
+
+[PR #11](https://github.com/Binz2008-star/Project-X/pull/11) is a separate OPEN
+DRAFT for `feature/xinsta-static-integration`, based on
+`feature/integration-readiness`. It carries the Phase 3 static evidence and
+inert Core diagnostics/settings work, plus the documentation updates recording
+the PR chain and owner-directed hold. It adds no hook, injection, signing,
+repackaging, installation, device execution, or runtime proof.
+
+The exact-456 class→selector→encoding table and selector-reference analysis are
+read-only investigations kept outside the repository. Their results must be
+recorded in the static evidence document before any single vertical-slice hook
+experiment is considered. PRs #7/#9/#10 remain held until that one-hook result
+is in.
+
 ## Model 1 review closure
 
 | Finding | Status | Evidence |
@@ -247,7 +262,7 @@ not merge authorization.
 
 1. Obtain written owner authorisation for device testing and for the specific
    enhanced features permitted for this owned app.
-2. Complete Model 1 re-review of this core.
+2. Retain the completed Model 1 / Phase 3 review records; any new code head requires a fresh review.
 3. Add one verified hook in the adapter, with a narrow method replacement on a
    confirmed method, and prove it against a locally installed, owner-owned copy
    of Instagram 456.0.0 — never against a store account.

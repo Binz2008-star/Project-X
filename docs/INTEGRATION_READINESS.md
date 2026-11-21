@@ -72,7 +72,7 @@ CI uses Python 3.12. Exact final-head run IDs and results are recorded in the PR
 
 ## Independent review
 
-Independent reviews have required multiple correction rounds. PR #9 received explicit `APPROVE` on `705bcd9` after B9-R1–R7 closure. PR #7 received explicit `APPROVE` on `46816c5` after A7-R1–R10 closure. PR #10 received `APPROVE` on the earlier converged head `aa10987`, but the final PR #7 publication-hardening fixes require a fresh verdict on this exact final head. No PR is merge-ready until each has an explicit approval on its final head.
+Independent reviews have required multiple correction rounds. PR #9 received a final-head independent `APPROVE` verdict on `705bcd9` after B9-R1–R7 closure ([evidence comment](https://github.com/Binz2008-star/Project-X/pull/9#issuecomment-7054446783)). PR #7 received a final-head independent `APPROVE` verdict on `46816c5` after A7-R1–R10 closure ([evidence comment](https://github.com/Binz2008-star/Project-X/pull/7#issuecomment-7054447156)). PR #10 was reconverged to PR #7's final `46816c5` code, and its exact final head `8c1ac3c` received a fresh independent `APPROVE` verdict ([evidence comment](https://github.com/Binz2008-star/Project-X/pull/10#issuecomment-7054446817)). All three remain **OPEN DRAFT**; review approval is not merge authorization.
 
 ## Next executable milestone
 

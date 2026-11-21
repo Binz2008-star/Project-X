@@ -1,6 +1,6 @@
-# Review findings matrix — A7 / B9 / integration
+# Review findings matrix — A7 / B9 / integration / Xinsta static
 
-Status values: **FIXED** (code, regression test and local verification present), **OPEN** (work in progress), **BLOCKED** (requires owner action or external prerequisite). Draft PRs are not merged.
+Status values: **FIXED** (code, regression test and local verification present), **VERIFIED** (static/documentation fact checked against the artifact or repository state), **OPEN** (work in progress), **BLOCKED** (requires owner action or external prerequisite). Draft PRs are not merged.
 
 ## PR #7 — IPA Analyzer (A7)
 
@@ -57,6 +57,16 @@ Status values: **FIXED** (code, regression test and local verification present),
 | C-5 | FIXED | No private paths, secret-looking values or local directories copied into output. Analyzer CLI uses fixed argument, input-error and publication-error codes. | Warning-retention and CLI private-path tests, A7-R5/R7/R10 tests, plus rejection no-echo assertions. |
 | C-6 | FIXED | Plan remains `dry_run`, `execution_permitted = false`, advisory authorization, blocked execution steps. | First integration test and B9 authorization tests. |
 
+## PR #11 — Xinsta static integration (X3)
+
+| ID | Status | Observation | Evidence |
+| --- | --- | --- | --- |
+| X3-1 | VERIFIED | PR #11 is a separate OPEN DRAFT based on `feature/integration-readiness`, so its diff is limited to Xinsta static-integration files rather than the unmerged analyzer/build-manager stack. | PR #11 metadata; `git diff --stat origin/feature/integration-readiness...HEAD` → 22 files, `+834 / -144`. |
+| X3-2 | VERIFIED | Read-only IG456 evidence records artifact hashes, package differences, selector references, runtime primitives, and explicit `VERIFIED` / `FAILED` / `BLOCKED` / `NOT TESTED` classifications. | `docs/IG456_STATIC_EVIDENCE.md`. |
+| X3-3 | VERIFIED | Core changes remain inert: compatibility gating, diagnostics, feature registry, and settings presentation make no hook, swizzle, injection, network, or runtime-modification call. | `ios/XinstaCore/` source inspection and `docs/XINSTA_CORE.md`. |
+| X3-4 | BLOCKED | Runtime hook success, X Settings presentation inside Instagram, preference-to-implementation linkage, and device behaviour require an owner-authorized runtime environment. | No execution, signing, injection, or device test has been performed. |
+| X3-5 | BLOCKED | PRs #7/#9/#10 and any merge/readiness transition are held until the single vertical-slice hook result is in. | Owner-directed hold recorded in `PROJECT_HANDOFF.md` and `ENGINEERING_HANDOFF.md`. |
+
 ## Not code findings — owner/external blockers
 
 | ID | Status | Blocker |
@@ -65,3 +75,4 @@ Status values: **FIXED** (code, regression test and local verification present),
 | O-2 | BLOCKED | Signing identity, provisioning profile and registered UDID are unavailable. |
 | O-3 | BLOCKED | No approved injection/implantation method or verified hook path exists. |
 | O-4 | BLOCKED | Physical iPhone 13 validation requires written scope and all device prerequisites. |
+| O-5 | BLOCKED | Merge/readiness transition for #7/#9/#10 is held until the single vertical-slice hook result is in. |

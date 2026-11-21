@@ -1,8 +1,23 @@
 # Project X — Engineering / Operations Handoff
 
-**Updated:** 20 November 2026  
-**Source inspected:** [feature/neon-staging-readiness](https://github.com/Binz2008-star/Project-X/tree/feature/neon-staging-readiness), commit `5b2e48a3bb7912aef42467fcb2b1d4ca5d8df888`.  
-**Companion:** [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md). Read [API_STATUS.md](API_STATUS.md), [API_SETUP.md](API_SETUP.md), and [NEON_STAGING.md](NEON_STAGING.md) for detailed contracts/limitations.
+**Updated:** 21 November 2026
+
+**Source inspected:** [feature/xinsta-static-integration](https://github.com/Binz2008-star/Project-X/tree/feature/xinsta-static-integration), commit `b7ba8d2deb43adfc3ffa5185890c5f5218010c67` ([PR #11](https://github.com/Binz2008-star/Project-X/pull/11)). The licensing/Neon details below remain the historical checkpoint from `5b2e48a3bb7912aef42467fcb2b1d4ca5d8df888`.
+
+**Companion:** [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md). Read [API_STATUS.md](API_STATUS.md), [API_SETUP.md](API_SETUP.md), [IG456_STATIC_EVIDENCE.md](IG456_STATIC_EVIDENCE.md), [XINSTA_CORE.md](XINSTA_CORE.md), and [NEON_STAGING.md](NEON_STAGING.md) for detailed contracts/limitations.
+
+## Current engineering checkpoint (21 November 2026)
+
+| PR | Base | Final head | Scope | Recorded state |
+| --- | --- | --- | --- | --- |
+| [#7](https://github.com/Binz2008-star/Project-X/pull/7) | `main` | `46816c5` | Read-only IPA analyzer | OPEN DRAFT; final-head independent `APPROVE` in evidence comment; CI `44844881381` / `44844886566` SUCCESS |
+| [#9](https://github.com/Binz2008-star/Project-X/pull/9) | `main` | `705bcd9` | Fail-closed Build Manager preflight | OPEN DRAFT; final-head independent `APPROVE` in evidence comment; CI `44843139122` / `44843152377` SUCCESS |
+| [#10](https://github.com/Binz2008-star/Project-X/pull/10) | `feature/ipa-build-manager` | `8c1ac3c` | Analyzer-to-preflight integration | OPEN DRAFT; final-head independent `APPROVE` in evidence comment; CI `44845435049` / `44845444698` SUCCESS |
+| [#11](https://github.com/Binz2008-star/Project-X/pull/11) | `feature/integration-readiness` | `b7ba8d2` | Xinsta read-only IG456 static evidence and inert Core diagnostics/settings | OPEN DRAFT; static only; no merge claim |
+
+Owner-directed hold: PRs #7/#9/#10 must not be merged, retargeted, or expanded until the single vertical-slice hook result is in. No PR in this chain has been merged. PR #11 does not add a hook, injection, signing, repackaging, installation, device execution, or runtime proof.
+
+The recommended merge sequence remains `#7 → #9 → #10` **only after explicit owner authorization**. PR #11 is intentionally based on `feature/integration-readiness` so its 22-file diff is not polluted by the unmerged analyzer/build-manager work.
 
 ## Git state / review chain
 
@@ -13,7 +28,7 @@
 | `feature/license-api-v1` | `feature/license-idempotency-device-limits` | [#3](https://github.com/Binz2008-star/Project-X/pull/3) |
 | `feature/license-idempotency-device-limits` | `feature/neon-staging-readiness` | [#4](https://github.com/Binz2008-star/Project-X/pull/4) |
 
-These are proposed changes, **not merged**. Do not silently retarget or merge PRs; if approval is given, review their dependencies and recalculate diffs in order.
+These historical licensing PRs were proposed changes, **not merged** at the 20 November checkpoint. Do not silently retarget or merge any PR; if approval is given, review dependencies and recalculate diffs in order.
 
 ## Code ownership boundaries
 
