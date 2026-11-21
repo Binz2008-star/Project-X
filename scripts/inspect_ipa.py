@@ -31,6 +31,17 @@ def _limits_from_args(args) -> ArchiveLimits | None:
     return ArchiveLimits(**overrides) if overrides else None
 
 
+class InvalidArguments(Exception):
+    """An argument error that must not echo user-controlled argument text."""
+
+
+class SafeArgumentParser(argparse.ArgumentParser):
+    """Argument parser that never prints raw arguments or private paths."""
+
+    def error(self, message: str) -> None:
+        raise InvalidArguments(message)
+
+
 class OutputCollisionError(Exception):
     """The output target became the input archive before publication."""
 
@@ -144,7 +155,7 @@ def _summary(report) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
+    parser = SafeArgumentParser(
         prog="inspect_ipa",
         description="Statically inspect an .ipa without extracting or modifying it.",
     )
@@ -159,7 +170,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="exit with status 1 when any critical finding is present",
     )
-    args = parser.parse_args(argv)
+    try:
+        args = parser.parse_args(argv)
+    except InvalidArguments:
+        print(
+            "REFUSED [INVALID_ARGUMENTS] command arguments could not be parsed",
+            file=sys.stderr,
+        )
+        return 2
 
     input_identity = _path_identity(args.ipa)
     if args.json_out and _output_collides(args.ipa, args.json_out, input_identity):
@@ -188,7 +206,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"REFUSED [NOT_AN_APPLICATION_IPA] {exc}", file=sys.stderr)
         return 2
     except FileNotFoundError:
-        print(f"REFUSED [FILE_NOT_FOUND] {args.ipa}", file=sys.stderr)
+        print("REFUSED [FILE_NOT_FOUND] input archive could not be read", file=sys.stderr)
         return 2
 
     payload = report.to_json()
