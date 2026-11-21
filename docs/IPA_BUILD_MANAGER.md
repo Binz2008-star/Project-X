@@ -113,7 +113,7 @@ Exit codes: `0` preflight passed, `2` preflight rejected, `1` unreadable/oversiz
 
 ## Verification
 
-B9 correction set: `142 passed` for `tests/test_build_manager_preflight.py` together with `tests/test_build_manager_authorization.py` using the repository virtualenv on 2026-11-21; combined API/staging run `31 passed, 29 skipped`; `git diff --check` clean. CI now runs both Build Manager suites. Exact final-head run IDs are recorded in the PR bodies.
+B9 correction and re-review set: `159 passed` for `tests/test_build_manager_preflight.py` together with `tests/test_build_manager_authorization.py` using the repository virtualenv on 2026-11-21; combined API/staging run `31 passed, 29 skipped`; `git diff --check` clean. CI on the earlier B9 head passed push run `44841872361` and PR run `44841879766`. The later re-review corrections and their final-head CI runs are recorded in the PR body.
 
 Earlier local/CI evidence below applies to prior commits only and does not cover the B9 changes:
 
@@ -149,6 +149,20 @@ No merge or deployment is implied by this approval. PR #9 remains DRAFT pending 
 | B9-6 | FIXED | Expected-severity map covers schema `1.0`/`1.1` and A7 codes; report severities not trusted. |
 | B9-7 | FIXED | Bounded JSON CLI input with iterative pre-scan and fixed errors. |
 | B9-8 | FIXED | PR #9 base retargeted to `main`; duplicated Xinsta Core commits removed from the PR diff without history rewrite. |
+
+## B9 re-review corrections
+
+The fresh independent review of the B9 head returned `REQUEST CHANGES`. Each finding is closed in code and regression tests:
+
+| ID | Status | Fix |
+| --- | --- | --- |
+| B9-R1 | FIXED | `schema_version` is type-checked before allowlist membership; unhashable values fail closed as `REPORT_INVALID` instead of raising `TypeError`. |
+| B9-R2 | FIXED | `report.macho.slices` must be a list of JSON objects before slice inspection; non-list values fail closed as `REPORT_INVALID`. |
+| B9-R3 | FIXED | Bounded JSON loading maps `ValueError` from oversized integer literals and malformed JSON to the fixed `input_unreadable` error. |
+| B9-R4 | FIXED | Verifier-raised codes are accepted only from the fixed allowlist; path-like or arbitrary codes reduce to `AUTHORIZATION_VERIFIER_FAILED`. |
+| B9-R5 | FIXED | Verifier-supplied method, signer and provenance values are string-checked before allowlist membership. |
+| B9-R6 | FIXED | Verification documentation no longer claims the branch was unpushed and cites the actual green CI runs. |
+| B9-R7 | FIXED | Documentation states that both report schemas `1.0` and `1.1` are accepted. |
 
 ## Security and compatibility considerations
 

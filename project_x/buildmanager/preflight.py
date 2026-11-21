@@ -508,7 +508,11 @@ def _add_once(
 
 def _validate_report(report: Any) -> None:
     data = _mapping(report, "report")
-    if data.get("schema_version") not in ACCEPTED_REPORT_SCHEMA_VERSIONS:
+    schema_version = data.get("schema_version")
+    if (
+        not isinstance(schema_version, str)
+        or schema_version not in ACCEPTED_REPORT_SCHEMA_VERSIONS
+    ):
         raise PreflightInputError("report.schema_version is not allowlisted")
 
     identity = _mapping(data.get("identity"), "report.identity")
@@ -538,6 +542,10 @@ def _validate_report(report: Any) -> None:
     macho = _mapping(data.get("macho"), "report.macho")
     if "slices" not in macho:
         raise PreflightInputError("report.macho.slices is required")
+    if not isinstance(macho["slices"], list):
+        raise PreflightInputError("report.macho.slices must be a list")
+    for slice_item in macho["slices"]:
+        _mapping(slice_item, "report.macho.slices[]")
     if "slice_count" not in macho:
         raise PreflightInputError("report.macho.slice_count is required")
     if not isinstance(macho["slice_count"], int) or isinstance(macho["slice_count"], bool):

@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -717,6 +718,36 @@ def test_unsupported_report_schema_is_rejected_without_echoing_it() -> None:
     assert secret_schema not in json.dumps(result.to_dict())
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param([], id="list"),
+        pytest.param({}, id="object"),
+        pytest.param([1], id="list-with-value"),
+        pytest.param({"marker": "SUPER_SECRET_SCHEMA"}, id="object-with-secret"),
+    ],
+)
+def test_unhashable_report_schema_is_rejected_without_exception(value) -> None:
+    report = inspection_report()
+    report["schema_version"] = value
+
+    result = evaluate(authorization_manifest(), report)
+
+    assert "REPORT_INVALID" in codes(result)
+    assert "SUPER_SECRET_SCHEMA" not in json.dumps(result.to_dict())
+
+
+@pytest.mark.parametrize("value", [None, 1, True, 1.5])
+def test_non_list_macho_slices_are_rejected_without_exception(value) -> None:
+    report = inspection_report()
+    report["macho"]["slices"] = value
+
+    result = evaluate(authorization_manifest(), report)
+
+    assert "REPORT_INVALID" in codes(result)
+    assert result.plan is None
+
+
 # --- B9-7: bounded JSON input in the CLI ------------------------------------
 
 
@@ -767,3 +798,22 @@ def test_cli_accepts_valid_report_schema_1_1(tmp_path, capsys) -> None:
     payload = json.loads(capsys.readouterr().out)
     assert payload["preflight_passed"] is True
     assert payload["plan"]["execution_permitted"] is False
+
+
+def test_cli_rejects_oversized_integer_literal(tmp_path, capsys) -> None:
+    args = _write_inputs(tmp_path, "9" * 5000)
+
+    assert main(args) == 1
+    assert json.loads(capsys.readouterr().out) == {"error": "input_unreadable"}
+
+
+def test_documentation_states_the_current_review_and_schema_contract() -> None:
+    document = Path(__file__).parents[1] / "docs" / "IPA_BUILD_MANAGER.md"
+    text = document.read_text(encoding="utf-8")
+
+    assert "has not been pushed" not in text
+    assert 'pinned `schema_version = "1.0"`' not in text
+    assert '44841872361' in text
+    assert '44841879766' in text
+    assert "`1.0`" in text
+    assert "`1.1`" in text

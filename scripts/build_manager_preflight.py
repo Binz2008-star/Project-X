@@ -93,6 +93,9 @@ def _load_bounded_json(path: Path) -> Any:
         return json.loads(text)
     except RecursionError:
         raise InputLimitError("json_too_deep") from None
+    except ValueError:
+        # Includes JSONDecodeError and Python's integer-string conversion limit.
+        raise InputLimitError("input_unreadable") from None
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -111,9 +114,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     except InputLimitError as exc:
         print(json.dumps({"error": exc.code}))
         return 1
-    except (OSError, json.JSONDecodeError) as exc:
-        # Do not echo paths or decoder detail: inputs may live in a private folder.
-        print(json.dumps({"error": "input_unreadable", "kind": type(exc).__name__}))
+    except (OSError, json.JSONDecodeError):
+        # Do not echo paths, exception types or decoder detail: inputs may live
+        # in a private folder.
+        print(json.dumps({"error": "input_unreadable"}))
         return 1
 
     result = evaluate(manifest_payload, report_payload)

@@ -30,6 +30,20 @@ UNKNOWN_SIGNER = "SIGNER_NOT_ALLOWED"
 UNKNOWN_PROVENANCE = "PROVENANCE_NOT_ALLOWED"
 AUTHORIZATION_ID_MISMATCH = "AUTHORIZATION_ID_NOT_BOUND"
 
+_FIXED_CODES = frozenset(
+    {
+        VERIFIER_REQUIRED,
+        MANIFEST_INVALID,
+        VERIFIER_FAILED,
+        UNVERIFIED,
+        UNKNOWN_METHOD,
+        ARTIFACT_MISMATCH,
+        UNKNOWN_SIGNER,
+        UNKNOWN_PROVENANCE,
+        AUTHORIZATION_ID_MISMATCH,
+    }
+)
+
 
 class AuthorizationVerificationError(ValueError):
     """Authorization was not proven; ``code`` is a fixed, value-free code."""
@@ -101,7 +115,10 @@ def require_execution_permit(
     try:
         result = verifier(dict(manifest))
     except AuthorizationVerificationError as exc:
-        raise AuthorizationVerificationError(exc.code) from None
+        # A verifier may raise only one of this module's fixed codes. Anything
+        # else can contain a path or secret, so reduce it to the generic code.
+        code = exc.code if isinstance(exc.code, str) and exc.code in _FIXED_CODES else VERIFIER_FAILED
+        raise AuthorizationVerificationError(code) from None
     except Exception:
         # Verifier exception text may contain paths or secrets; discard it.
         raise AuthorizationVerificationError(VERIFIER_FAILED) from None
@@ -110,15 +127,15 @@ def require_execution_permit(
         raise AuthorizationVerificationError(VERIFIER_FAILED)
     if result.cryptographically_verified is not True:
         raise AuthorizationVerificationError(UNVERIFIED)
-    if result.method not in RECOGNIZED_VERIFICATION_METHODS:
+    if not isinstance(result.method, str) or result.method not in RECOGNIZED_VERIFICATION_METHODS:
         raise AuthorizationVerificationError(UNKNOWN_METHOD)
-    if result.artifact_sha256 != auth.expected_sha256:
+    if not isinstance(result.artifact_sha256, str) or result.artifact_sha256 != auth.expected_sha256:
         raise AuthorizationVerificationError(ARTIFACT_MISMATCH)
-    if result.authorization_id != auth.authorization_id:
+    if not isinstance(result.authorization_id, str) or result.authorization_id != auth.authorization_id:
         raise AuthorizationVerificationError(AUTHORIZATION_ID_MISMATCH)
-    if result.signer not in ALLOWED_SIGNERS:
+    if not isinstance(result.signer, str) or result.signer not in ALLOWED_SIGNERS:
         raise AuthorizationVerificationError(UNKNOWN_SIGNER)
-    if result.provenance not in ALLOWED_PROVENANCE:
+    if not isinstance(result.provenance, str) or result.provenance not in ALLOWED_PROVENANCE:
         raise AuthorizationVerificationError(UNKNOWN_PROVENANCE)
 
     return ExecutionPermit(
